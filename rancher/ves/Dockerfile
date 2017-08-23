@@ -1,4 +1,5 @@
 FROM ubuntu:xenial
+ENV TERM=xterm
 
 RUN apt-get update
 RUN apt-get -y upgrade
