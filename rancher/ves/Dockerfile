@@ -10,7 +10,5 @@ RUN git clone https://github.com/blsaws/nancy.git
 RUN cp nancy/rancher/ves/monitor.py \
   evel-test-collector/code/collector/monitor.py
 
-RUN python evel-test-collector/code/collector/monitor.py \
-  --config evel-test-collector/config/collector.conf \
-  --section default > ~/monitor.log
+RUN top
 
