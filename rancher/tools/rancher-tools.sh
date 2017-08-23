@@ -24,11 +24,29 @@
 # Install rancher master 
 # Usage example: install_master 172.16.0.2
 function install_master() {
+  echo "${FUNCNAME[0]}: installing and starting docker"
+  # Per https://docs.docker.com/engine/installation/linux/docker-ce/ubuntu/
+  sudo apt-get remove -y docker docker-engine docker.io
+  sudo apt-get update
+  sudo apt-get install -y \
+    linux-image-extra-$(uname -r) \
+    linux-image-extra-virtual
+  sudo apt-get install -y \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    software-properties-common
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+  sudo add-apt-repository \
+   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+   $(lsb_release -cs) \
+   stable"
+  sudo apt-get update
+  sudo apt-get install -y docker-ce
+
   echo "${FUNCNAME[0]}: installing jq"
   sudo apt-get install -y jq
-  echo "${FUNCNAME[0]}: installing and starting docker"
-  sudo apt-get install -y docker.io
-  sudo service docker start
+
   echo "${FUNCNAME[0]}: installing rancher server (master)"
   sudo docker run -d --restart=unless-stopped -p 8080:8080 --name rancher rancher/server
 
@@ -157,7 +175,7 @@ function check_service() {
   service=$1
   scheme=$2
   match="$3"
-  id=$(rancher ps | grep "$service" | awk "{print \$1}")
+  id=$(rancher ps | grep " service " | grep " $service " | awk "{print \$1}")
   n=0
   while [[ "$(rancher inspect $id | jq -r ".publicEndpoints[$n].ipAddress")" != "null" ]]; do
     ip=$(rancher inspect $id | jq -r ".publicEndpoints[$n].ipAddress")
@@ -179,7 +197,7 @@ function wait_till_healthy() {
 
   let delay=$tries*10
   echo "${FUNCNAME[0]}: waiting for service $service to be ready in $delay seconds"
-  id=$(rancher ps | grep "$service" | awk "{print \$1}")
+  id=$(rancher ps | grep " service " | grep " $service " | awk "{print \$1}")
   health=$(rancher inspect $id | jq -r ".healthState")
   state=$(rancher inspect $id | jq -r ".state")
   while [[ $tries > 0 && "$health" != "healthy" ]]; do
@@ -415,7 +433,7 @@ function start_complex_service() {
   echo "${FUNCNAME[0]}: creating service folder ~/rancher/$service"
   mkdir ~/rancher/$service
   cd  ~/rancher/$service
-  echo "${FUNCNAME[0]}: creating docker-compose.yml and rancher-compose.yml"
+  echo "${FUNCNAME[0]}: creating docker-compose.yml"
   # Define service via docker-compose.yml
   case "$service" in
     grafana)
@@ -437,7 +455,7 @@ EOF
   echo "${FUNCNAME[0]}: starting service $service"
   rancher up -s $service -d
 
-  wait_till_healthy $service $service 6
+  wait_till_healthy "$service/$service" 6
   cd  ~/rancher
 }
 
