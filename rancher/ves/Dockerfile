@@ -10,5 +10,5 @@ RUN git clone https://github.com/blsaws/nancy.git
 RUN cp nancy/rancher/ves/monitor.py \
   evel-test-collector/code/collector/monitor.py
 
-RUN top
+RUN /bin/bash
 
