@@ -175,7 +175,7 @@ function check_service() {
   service=$1
   scheme=$2
   match="$3"
-  id=$(rancher ps | grep " service " | grep " $service " | awk "{print \$1}")
+  id=$(rancher ps | grep " $service " | awk "{print \$1}")
   n=0
   while [[ "$(rancher inspect $id | jq -r ".publicEndpoints[$n].ipAddress")" != "null" ]]; do
     ip=$(rancher inspect $id | jq -r ".publicEndpoints[$n].ipAddress")
@@ -197,7 +197,7 @@ function wait_till_healthy() {
 
   let delay=$tries*10
   echo "${FUNCNAME[0]}: waiting for service $service to be ready in $delay seconds"
-  id=$(rancher ps | grep " service " | grep " $service " | awk "{print \$1}")
+  id=$(rancher ps | grep " $service " | awk "{print \$1}")
   health=$(rancher inspect $id | jq -r ".healthState")
   state=$(rancher inspect $id | jq -r ".state")
   while [[ $tries > 0 && "$health" != "healthy" ]]; do
@@ -249,7 +249,7 @@ EOF
   echo "${FUNCNAME[0]}: starting service $service"
   rancher up -s $service -d
 
-  wait_till_healthy $service $service 6
+  wait_till_healthy "$service/$service" 6
   cd  ~/rancher
 }
 
@@ -309,7 +309,7 @@ EOF
 # Usage example: scale_service nginx 1
 function scale_service() {
   echo "${FUNCNAME[0]}: scaling service $1 to $2 instances"
-  id=$(rancher ps | grep -e $1 -e " service " | awk '{print $1}')
+  id=$(rancher ps | grep " $1 " | awk '{print $1}')
   rancher scale $id=$2
 
   scale=$(rancher inspect $id | jq -r '.currentScale')
@@ -326,7 +326,7 @@ function scale_service() {
 # Get public endpoint for a service
 # Usage example public_endpoint nginx/lb
 function public_endpoint() {
-    id=$(rancher ps | grep "$1" | awk "{print \$1}")
+    id=$(rancher ps | grep " $1 " | awk "{print \$1}")
     ip=$(rancher inspect $id | jq -r ".publicEndpoints[0].ipAddress")
     port=$(rancher inspect $id | jq -r ".publicEndpoints[0].port")
     echo "${FUNCNAME[0]}: $1 is accessible at http://$ip:$port"
