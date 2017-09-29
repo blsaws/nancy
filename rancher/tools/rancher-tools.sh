@@ -17,6 +17,8 @@
 # Prerequisites: 
 # - Ubuntu server for master and agent nodes
 # Usage:
+# $ git clone https://github.com/blsaws/nancy.git 
+# $ cd nancy/rancher
 # $ source rancher-tools.sh
 # See below for function-specific usage
 #
@@ -399,9 +401,16 @@ function rancher_demo() {
     check_service dokuwiki/lb http "This topic does not exist yet"
     # Grafana server, accessible on one machine at port 3000
     start_complex_service grafana 3000:3000 1
+    id=$(rancher ps | grep " grafana/grafana " | awk "{print \$1}")
+    cd $0
+    source ../prometheus/prometheus-tools.sh setup
+    grafana_ip=$(rancher inspect $id | jq -r ".publicEndpoints[0].ipAddress")
+    prometheus_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
+    connect_grafana $prometheus_ip $grafana_ip
     public_endpoint nginx/lb
     public_endpoint dokuwiki/lb
     public_endpoint grafana/grafana
+
     end=`date +%s`
     runtime=$((end-start))
     runtime=$((runtime/60))
