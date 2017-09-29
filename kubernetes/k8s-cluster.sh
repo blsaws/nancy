@@ -22,14 +22,15 @@
 #. Usage:
 #. $ git clone https://github.com/blsaws/nancy.git 
 #. $ cd nancy/kubernetes
-#. $ bash k8s-cluster.sh setup "<space-separated list of agent IPs>"
+#. $ bash k8s-cluster.sh master
+#. run "watch kubectl get pods --all-namespaces" until kube-dns pod is "ready"
+#. $ bash k8s-cluster.sh agents "<space-separated list of agent IPs>"
 #.   e.g "172.16.0.5 172.16.0.6 172.16.0.7 172.16.0.8"
 #. If you want to setup helm as app kubernetes orchestration tool:
 #. $ bash k8s-cluster.sh helm
 #
 
-function setup_kubernetes() {
-  echo "$0: Setting up kubernetes master and agents"
+function setup_prereqs() {
   echo "$0: Create prerequisite setup script"
   cat <<'EOG' >/tmp/prereqs.sh
 #!/bin/bash
@@ -53,8 +54,11 @@ EOF
 sudo apt-get update
 sudo apt-get install -y kubelet kubeadm kubectl
 EOG
+}
 
-  echo "$0: Setup the kubernetes master"
+function setup_k8s_master() {
+  echo "$0: Setting up kubernetes master"
+
   # Install master 
   bash /tmp/prereqs.sh master
   # per https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
@@ -62,8 +66,8 @@ EOG
   # --pod-network-cidr=192.168.0.0/16 is required for calico; this should not conflict with your server network interface subnets
   sudo kubeadm init --pod-network-cidr=192.168.0.0/16 >>/tmp/kubeadm.out
   cat /tmp/kubeadm.out
-  joincmd=$(grep "kubeadm join" /tmp/kubeadm.out)
-  echo "$0: Cluster join command for manual use if needed: $joincmd"
+  export k8s_joincmd=$(grep "kubeadm join" /tmp/kubeadm.out)
+  echo "$0: Cluster join command for manual use if needed: $k8s_joincmd"
 
   # Start cluster
   echo "$0: Start the cluster"
@@ -73,7 +77,9 @@ EOG
   # Deploy pod network
   echo "$0: Deploy calico as CNI"
   sudo kubectl apply -f http://docs.projectcalico.org/v2.4/getting-started/kubernetes/installation/hosted/kubeadm/1.6/calico.yaml
+}
 
+function setup_k8s_agents() {
   # Install agents
   agents=$1
   for agent in $agents; do
@@ -82,7 +88,7 @@ EOG
     ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent bash /tmp/prereqs.sh agent
     # Workaround for "[preflight] Some fatal errors occurred: /var/lib/kubelet is not empty" per https://github.com/kubernetes/kubeadm/issues/1
     ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent sudo kubeadm reset
-    ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent sudo $joincmd
+    ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent sudo $k8s_joincmd
   done
 
   echo "$0: All done. Kubernetes cluster is ready when all nodes in the output of 'kubectl get nodes' show as 'ready'."
@@ -106,8 +112,13 @@ function setup_helm() {
 }
 
 case "$1" in
-  setup)
-    setup_kubernetes $2
+  master)
+    setup_prereqs
+    setup_k8s_master
+    ;;
+  agents)
+    setup_prereqs
+    setup_k8s_agents $2
     ;;
   helm)
     setup_helm
