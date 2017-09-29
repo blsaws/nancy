@@ -16,12 +16,13 @@
 # What this is: Functions for testing with Prometheus. 
 # Prerequisites: 
 # - Ubuntu server for master and agent nodes
-# Usage:
-# $ git clone https://github.com/blsaws/nancy.git 
-# $ cd nancy/prometheus
-# $ source prometheus-tools.sh setup "<list of agent nodes>"
-# <list of agent nodes>: space separated IP of agent nodes
-# $ source prometheus-tools.sh clean "<list of agent nodes>"
+
+#. Usage:
+#. $ git clone https://github.com/blsaws/nancy.git 
+#. $ cd nancy/prometheus
+#. $ bash prometheus-tools.sh setup "<list of agent nodes>"
+#. <list of agent nodes>: space separated IP of agent nodes
+#. $ bash prometheus-tools.sh clean "<list of agent nodes>"
 #
 
 # Prometheus links
@@ -33,11 +34,13 @@
 # https://github.com/prometheus/haproxy_exporter
 # https://github.com/prometheus/collectd_exporter
 
-function setup() {
+function setup_prometheus() {
   # Prerequisites
+  echo "$0: Setting up prometheus master and agents"
   sudo apt install -y golang-go jq
 
   # Install Prometheus server
+  echo "$0: Setting up prometheus master"
   if [[ -d ~/prometheus ]]; then rm -rf ~/prometheus; fi
   mkdir ~/prometheus
   mkdir ~/prometheus/dashboards
@@ -78,6 +81,7 @@ EOF
   nohup ./prometheus --config.file=prometheus.yml &
   # Browse to http://host_ip:9090
 
+  echo "$0: Installing exporters"
   # Install exporters
   # https://github.com/prometheus/node_exporter
   cd ~/prometheus
@@ -89,6 +93,7 @@ EOF
 
   # The scp and ssh actions below assume you have key-based access enabled to the nodes
   for node in $nodes; do
+    echo "$0: Setup agent at $node"
     scp -r -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
       node_exporter-0.14.0.linux-amd64/node_exporter ubuntu@$node:/home/ubuntu/node_exporter
     ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
@@ -101,10 +106,11 @@ EOF
 }
 
 function connect_grafana() {
-  # Setup Prometheus datasource for Grafana
+  echo "$0: Setup Grafana"
   prometheus_ip=$1
   grafana_ip=$2
 
+  echo "$0: Setup Prometheus datasource for Grafana"
   cd ~/prometheus/
   cat >datasources.json <<EOF
 {"name":"Prometheus", "type":"prometheus", "access":"proxy", \
@@ -114,6 +120,7 @@ EOF
     -H "Content-type: application/json" \
     -d @datasources.json http://admin:admin@$grafana_ip:3000/api/datasources
 
+  echo "$0: Import Grafana dashboards"
   # Setup Prometheus dashboards
   # https://grafana.com/dashboards?dataSource=prometheus
   # To add additional dashboards, browse the URL above and import the dashboard via the id displayed for the dashboard
@@ -129,27 +136,10 @@ EOF
   done
 }
 
-function clean() {
-  sudo kill $(ps -ef | grep "\./prometheus" | grep prometheus.yml | awk '{print $2}')
-  rm -rf ~/prometheus
-  sudo docker stop grafana
-  sudo docker rm grafana
-  for node in $nodes; do
-    ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
-      ubuntu@$node "sudo kill $(ps -ef | grep ./node_exporter | awk '{print $2}')"
-    ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
-      ubuntu@$node "rm -rf /home/ubuntu/node_exporter"
-    ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
-      ubuntu@$node "sudo kill $(ps -ef | grep ./haproxy_exporter | awk '{print $2}')"
-    ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
-      ubuntu@$node "rm -rf /home/ubuntu/haproxy_exporter"
-  done
-}
-
 nodes=$2
 case "$1" in
   setup)
-    setup
+    setup_prometheus
     ;;
   grafana)
     # Per http://docs.grafana.org/installation/docker/
@@ -157,7 +147,21 @@ case "$1" in
     sudo docker run -d -p 3000:3000 --name grafana grafana/grafana
     connect_grafana $host_ip $host_ip
   clean)
-    clean
+    sudo kill $(ps -ef | grep "\./prometheus" | grep prometheus.yml | awk '{print $2}')
+    rm -rf ~/prometheus
+    sudo docker stop grafana
+    sudo docker rm grafana
+    for node in $nodes; do
+      ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
+        ubuntu@$node "sudo kill $(ps -ef | grep ./node_exporter | awk '{print $2}')"
+      ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
+        ubuntu@$node "rm -rf /home/ubuntu/node_exporter"
+      ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
+        ubuntu@$node "sudo kill $(ps -ef | grep ./haproxy_exporter | awk '{print $2}')"
+      ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
+        ubuntu@$node "rm -rf /home/ubuntu/haproxy_exporter"
+    done
     ;;
   *)
+    grep '#. ' $0
 esac
