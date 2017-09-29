@@ -74,3 +74,15 @@ ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent
 ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent sudo kubeadm reset
 ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent sudo $joincmd
 done
+
+# Install Helm
+cd ~
+curl https://raw.githubusercontent.com/kubernetes/helm/master/scripts/get > get_helm.sh
+chmod 700 get_helm.sh
+./get_helm.sh
+helm init
+helm repo update
+# Workaround for bug https://github.com/kubernetes/helm/issues/2224
+kubectl create clusterrolebinding permissive-binding --clusterrole=cluster-admin --user=admin --user=kubelet --group=system:serviceaccounts;
+# Install services via helm charts from https://kubeapps.com/charts
+# e.g. helm install stable/dokuwiki
