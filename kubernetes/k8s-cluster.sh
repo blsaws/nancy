@@ -43,25 +43,23 @@ fi
 # Install docker 1.12 (default for xenial is 1.12.6)
 sudo apt-get install -y docker.io
 sudo service docker start
-# Install kubectl per https://kubernetes.io/docs/tasks/tools/install-kubectl/        
-curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
-chmod +x ./kubectl 
-sudo mv ./kubectl /usr/local/bin/kubectl
-# Install kubelet & kubeadm per https://kubernetes.io/docs/setup/independent/install-kubeadm/
+# per https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
+# Install kubelet, kubeadm, kubectl per https://kubernetes.io/docs/setup/independent/install-kubeadm/
 sudo apt-get update && sudo apt-get install -y apt-transport-https
 curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
 cat <<EOF | sudo tee /etc/apt/sources.list.d/kubernetes.list
 deb http://apt.kubernetes.io/ kubernetes-xenial main
 EOF
 sudo apt-get update
-sudo apt-get install -y kubelet kubeadm
+sudo apt-get install -y kubelet kubeadm kubectl
 EOG
 
   echo "$0: Setup the kubernetes master"
   # Install master 
   bash /tmp/prereqs.sh master
+  # per https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
   # If the following command fails, run "kubeadm reset" before trying again
-  #  --pod-network-cidr=192.168.0.0/16 is required for calico; this should not conflict with your server network interface subnets
+  # --pod-network-cidr=192.168.0.0/16 is required for calico; this should not conflict with your server network interface subnets
   sudo kubeadm init --pod-network-cidr=192.168.0.0/16 >>/tmp/kubeadm.out
   cat /tmp/kubeadm.out
   joincmd=$(grep "kubeadm join" /tmp/kubeadm.out)
