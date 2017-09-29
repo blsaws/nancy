@@ -19,9 +19,9 @@
 # Usage:
 # $ git clone https://github.com/blsaws/nancy.git 
 # $ cd nancy/prometheus
-# $ source prometheus-k8s.sh setup "<list of agent nodes>"
+# $ source prometheus-tools.sh setup "<list of agent nodes>"
 # <list of agent nodes>: space separated IP of agent nodes
-# $ source prometheus-k8s.sh clean "<list of agent nodes>"
+# $ source prometheus-tools.sh clean "<list of agent nodes>"
 #
 
 # Prometheus links

@@ -403,7 +403,7 @@ function rancher_demo() {
     start_complex_service grafana 3000:3000 1
     id=$(rancher ps | grep " grafana/grafana " | awk "{print \$1}")
     cd $0
-    source ../prometheus/prometheus-tools.sh setup
+    source ../prometheus/prometheus-tools.sh setup "$agents"
     grafana_ip=$(rancher inspect $id | jq -r ".publicEndpoints[0].ipAddress")
     prometheus_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
     connect_grafana $prometheus_ip $grafana_ip
