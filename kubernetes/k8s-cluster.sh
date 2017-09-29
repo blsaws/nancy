@@ -107,10 +107,9 @@ function setup_helm() {
   # e.g. helm install stable/dokuwiki
 }
 
-nodes=$2
 case "$1" in
   setup)
-    setup_kubernetes
+    setup_kubernetes $2
     ;;
   helm)
     setup_helm
