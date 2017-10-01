@@ -22,12 +22,19 @@
 #. Usage:
 #. $ git clone https://github.com/blsaws/nancy.git 
 #. $ cd nancy/kubernetes
-#. $ bash k8s-cluster.sh master
+#. $ source k8s-cluster.sh master
 #. run "watch kubectl get pods --all-namespaces" until kube-dns pod is "ready"
-#. $ bash k8s-cluster.sh agents "<space-separated list of agent IPs>"
-#.   e.g "172.16.0.5 172.16.0.6 172.16.0.7 172.16.0.8"
+#. $ source k8s-cluster.sh agents "<space-separated list of agent IPs>"
+#.   e.g source k8s-cluster.sh agents "10.5.62.3 10.5.62.4 10.5.62.5"
+#. $ source k8s-cluster.sh ceph <ceph_dev> "<nodes>" <cluster-net> <public-net>
+#.     ceph_dev: disk to use for ceph. ***MUST NOT BE USED FOR ANY OTHER PURPOSE***
+#.     nodes: space-separated list of ceph node IPs
+#.     cluster-net: CIDR of ceph cluster network (typically private)
+#.     public-net: CIDR of public network
+#.   e.g source k8s-cluster.sh ceph "10.5.62.3 10.5.62.4 10.5.62.5" 10.5.62.2/24 204.178.3.195/27
+#.   The master node will be setup as ceph-mon and the agents as ceph-osd
 #. If you want to setup helm as app kubernetes orchestration tool:
-#. $ bash k8s-cluster.sh helm
+#. $ source k8s-cluster.sh helm
 #
 
 function setup_prereqs() {
@@ -35,6 +42,7 @@ function setup_prereqs() {
   cat <<'EOG' >/tmp/prereqs.sh
 #!/bin/bash
 # Basic server pre-reqs
+sudo apt-get -y remove kubectl kubelet kubeadm
 sudo apt-get update
 sudo apt-get upgrade -y
 # Set hostname on agent nodes
@@ -44,6 +52,7 @@ fi
 # Install docker 1.12 (default for xenial is 1.12.6)
 sudo apt-get install -y docker.io
 sudo service docker start
+export KUBE_VERSION=1.7.5
 # per https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
 # Install kubelet, kubeadm, kubectl per https://kubernetes.io/docs/setup/independent/install-kubeadm/
 sudo apt-get update && sudo apt-get install -y apt-transport-https
@@ -52,7 +61,9 @@ cat <<EOF | sudo tee /etc/apt/sources.list.d/kubernetes.list
 deb http://apt.kubernetes.io/ kubernetes-xenial main
 EOF
 sudo apt-get update
-sudo apt-get install -y kubelet kubeadm kubectl
+# Next command is to workaround bug resulting in "PersistentVolumeClaim is not bound" for pod startup (remain in Pending)
+sudo apt-get -y install ceph-common
+sudo apt-get -y install --allow-downgrades kubectl=${KUBE_VERSION}-00 kubelet=${KUBE_VERSION}-00 kubeadm=${KUBE_VERSION}-00
 EOG
 }
 
@@ -72,7 +83,7 @@ function setup_k8s_master() {
   # Start cluster
   echo "$0: Start the cluster"
   mkdir -p $HOME/.kube
-  sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  sudo cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
   sudo chown $(id -u):$(id -g) $HOME/.kube/config
   # Deploy pod network
   echo "$0: Deploy calico as CNI"
@@ -80,8 +91,9 @@ function setup_k8s_master() {
 }
 
 function setup_k8s_agents() {
-  # Install agents
-  agents=$1
+  export k8s_joincmd=$(grep "kubeadm join" /tmp/kubeadm.out)
+  echo "$0: Installing agents at $1 with joincmd: $k8s_joincmd"
+  agents="$1"
   for agent in $agents; do
     echo "$0: Install agent at $agent"
     scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no /tmp/prereqs.sh ubuntu@$agent:/tmp/prereqs.sh
@@ -90,9 +102,52 @@ function setup_k8s_agents() {
     ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent sudo kubeadm reset
     ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent sudo $k8s_joincmd
   done
+}
 
-  echo "$0: All done. Kubernetes cluster is ready when all nodes in the output of 'kubectl get nodes' show as 'ready'."
-  echo "$0: In the meantime, you can run this cmd to setup helm as app orchestrator: bash $(dirname $0)/k8s-cluster.sh helm"
+function setup_ceph() {
+  ceph_dev=$1
+  ceph_dev="sdb"
+  node_ips=$2
+  node_ips="10.5.62.3 10.5.62.4 10.5.62.5"
+  cluster_net=$3
+  cluster_net="10.5.62.2/24"
+  public_net=$4
+  public_net="204.178.3.195/27"
+  # Also caches the server fingerprints so ceph-deploy does not prompt the user
+  for node_ip in $node_ips; do
+    echo "$0: Install ntp and ceph on $node_ip"
+    ssh -x -o StrictHostKeyChecking=no ubuntu@$node_ip <<EOF
+sudo timedatectl set-ntp no
+wget -q -O- 'https://download.ceph.com/keys/release.asc' | sudo apt-key add -
+echo deb https://download.ceph.com/debian/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list
+sudo apt update
+sudo apt-get install -y ntp ceph ceph-deploy
+EOF
+  done
+  mon_ip=$(echo $node_ips | cut -d ' ' -f 1)
+  mon_host=$(ssh -x -o StrictHostKeyChecking=no ubuntu@$mon_ip hostname)
+  echo "$0: Deploying ceph-mon on localhost $HOSTNAME"
+  echo "$0: Deploying ceph-osd on nodes $node_ips"
+  echo "$0: Setting cluster-network=$cluster_net and public-network=$public_net"
+
+  # per http://docs.ceph.com/docs/master/start/quick-ceph-deploy/
+  sudo timedatectl set-ntp no
+  wget -q -O- 'https://download.ceph.com/keys/release.asc' | sudo apt-key add -
+  echo deb https://download.ceph.com/debian/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list
+  sudo apt update
+  sudo apt-get install -y ceph ceph-deploy ntp
+  mkdir ~/ceph-cluster
+  cd ~/ceph-cluster
+  ceph-deploy new --cluster-network $cluster_net --public-network $public_net --no-ssh-copykey $HOSTNAME
+  ceph-deploy install $node_ips
+  ceph-deploy mon create-initial
+  ceph-deploy admin $node_ips
+  for node_ip in $node_ips; do
+    echo "$0: Create ceph osd on $node_ip using $ceph_dev"
+    ceph-deploy osd create $node_ip:$ceph_dev
+  done
+  ssh -x -o StrictHostKeyChecking=no ubuntu@$mon_ip sudo ceph health
+  ssh -x -o StrictHostKeyChecking=no ubuntu@$mon_ip sudo ceph -s
 }
 
 function setup_helm() {
@@ -111,14 +166,28 @@ function setup_helm() {
   # e.g. helm install stable/dokuwiki
 }
 
+export WORK_DIR=$(pwd)
 case "$1" in
   master)
     setup_prereqs
     setup_k8s_master
     ;;
   agents)
+    kubedns=$(kubectl get pods --all-namespaces | grep kube-dns | awk '{print $4}')
+    while [[ "$kubedns" != "Running" ]]; do
+      echo "$0: kube-dns status is $kubedns. Waiting 60 seconds for it to be 'Running'" 
+      sleep 60
+      kubedns=$(kubectl get pods --all-namespaces | grep kube-dns | awk '{print $4}')
+    done
+    echo "$0: kube-dns status is $kubedns" 
     setup_prereqs
-    setup_k8s_agents $2
+    setup_k8s_agents "$2"
+    echo "$0: All done. Kubernetes cluster is ready when all nodes in the output of 'kubectl get nodes' show as 'Ready'."
+    echo "$0: In the meantime, you can run this cmd to setup helm as app orchestrator: bash $WORK_DIR/k8s-cluster.sh helm"
+    echo "$0: Then to test helm: helm install --name minecraft --set minecraftServer.eula=true stable/minecraft"
+    ;;
+  ceph)
+    setup_ceph $2 $3 $4 $5
     ;;
   helm)
     setup_helm
