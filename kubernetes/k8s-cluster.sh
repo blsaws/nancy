@@ -23,18 +23,17 @@
 #. $ git clone https://github.com/blsaws/nancy.git 
 #. $ cd nancy/kubernetes
 #. $ source k8s-cluster.sh master
-#. run "watch kubectl get pods --all-namespaces" until kube-dns pod is "ready"
 #. $ source k8s-cluster.sh agents "<space-separated list of agent IPs>"
-#.   e.g source k8s-cluster.sh agents "10.5.62.3 10.5.62.4 10.5.62.5"
 #. $ source k8s-cluster.sh ceph <ceph_dev> "<nodes>" <cluster-net> <public-net>
 #.     ceph_dev: disk to use for ceph. ***MUST NOT BE USED FOR ANY OTHER PURPOSE***
 #.     nodes: space-separated list of ceph node IPs
 #.     cluster-net: CIDR of ceph cluster network (typically private)
 #.     public-net: CIDR of public network
-#.   e.g source k8s-cluster.sh ceph "10.5.62.3 10.5.62.4 10.5.62.5" 10.5.62.2/24 204.178.3.195/27
 #.   The master node will be setup as ceph-mon and the agents as ceph-osd
 #. If you want to setup helm as app kubernetes orchestration tool:
 #. $ source k8s-cluster.sh helm
+#.
+#. Status: work in progress, incomplete
 #
 
 function setup_prereqs() {
@@ -106,13 +105,9 @@ function setup_k8s_agents() {
 
 function setup_ceph() {
   ceph_dev=$1
-  ceph_dev="sdb"
   node_ips=$2
-  node_ips="10.5.62.3 10.5.62.4 10.5.62.5"
   cluster_net=$3
-  cluster_net="10.5.62.2/24"
   public_net=$4
-  public_net="204.178.3.195/27"
   # Also caches the server fingerprints so ceph-deploy does not prompt the user
   for node_ip in $node_ips; do
     echo "$0: Install ntp and ceph on $node_ip"
@@ -148,6 +143,76 @@ EOF
   done
   ssh -x -o StrictHostKeyChecking=no ubuntu@$mon_ip sudo ceph health
   ssh -x -o StrictHostKeyChecking=no ubuntu@$mon_ip sudo ceph -s
+
+  # per https://crondev.com/kubernetes-persistent-storage-ceph/
+  sudo sed -i -- 's~gcr.io/google_containers/kube-controller-manager-amd64:v1.7.7~quay.io/attcomdev/kube-controller-manager:v1.6.1~' /etc/kubernetes/manifests/kube-controller-manager.yaml
+  mgr=$(kubectl get pods --all-namespaces | grep kube-controller-manager | awk '{print $4}')
+  while [[ "$mgr" != "Running" ]]; do
+    echo "$0: kube-controller-manager status is $kubedns. Waiting 60 seconds for it to be 'Running'" 
+    sleep 60
+    mgr=$(kubectl get pods --all-namespaces | grep kube-controller-manager | awk '{print $4}')
+  done
+  echo "$0: kube-controller-manager status is $kubedns"
+  admin_key=$(sudo ceph --cluster ceph auth get-key client.admin)
+  kubectl create secret generic ceph-secret --type="kubernetes.io/rbd" --from-literal=key="$admin_key" --namespace=kube-system
+  sudo ceph --cluster ceph osd pool create kube 1024 1024
+  sudo ceph --cluster ceph auth get-or-create client.kube mon 'allow r' osd 'allow rwx pool=kube'
+  kube_key=$(sudo ceph --cluster ceph auth get-key client.kube)
+  kubectl create secret generic ceph-secret-kube --type="kubernetes.io/rbd" --from-literal=key="$kube_key" --namespace=default
+  # Per https://github.com/kubernetes/examples/blob/master/staging/persistent-volume-provisioning/README.md
+  # TODO: find out where in the above ~/.kube folders became owned by root
+  sudo chown -R ubuntu:ubuntu ~/.kube/*
+  cat <<EOF >/tmp/ceph-sc.yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+   name: slow
+provisioner: kubernetes.io/rbd
+parameters:
+    monitors: $mon_ip:6789
+    adminId: admin
+    adminSecretName: ceph-secret-admin
+    adminSecretNamespace: "kube-system"
+    pool: kube
+    userId: kube
+    userSecretName: ceph-secret-user
+EOF
+  kubectl create -f /tmp/ceph-sc.yaml
+
+  kubectl create secret generic ceph-secret-admin --from-literal=key="$admin_key" --namespace=kube-system --type=kubernetes.io/rbd
+  kubectl create secret generic ceph-secret-user --from-literal=key="$kube_key" --namespace=default --type=kubernetes.io/rbd
+  # git clone https://github.com/kubernetes/charts.git
+  # sed -i -- 's/# storageClass: "-"/storageClass: "slow"/' charts/stable/mariadb/values.yaml
+  # grep storageClass charts/stable/mariadb/values.yaml
+  # helm install -f charts/stable/mariadb/values.yaml stable/mariadb
+  # sed -i -- 's/# storageClass:/storageClass: "slow"/' charts/stable/mediawiki/values.yaml
+  # helm install -f charts/stable/mediawiki/values.yaml stable/mediawiki
+  # kubectl describe pvc  
+
+  # Removed 'beta' from below
+  cat <<EOF >/tmp/ceph-pvc.yaml
+{
+  "kind": "PersistentVolumeClaim",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "claim1",
+    "annotations": {
+        "volume.kubernetes.io/storage-class": "ceph"
+    }
+  },
+  "spec": {
+    "accessModes": [
+      "ReadWriteOnce"
+    ],
+    "resources": {
+      "requests": {
+        "storage": "3Gi"
+      }
+    }
+  }
+}
+EOF
+  kubectl create -f /tmp/ceph-pvc.yaml
 }
 
 function setup_helm() {
