@@ -13,31 +13,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# What this is: script to setup a kubernetes cluster with calico as sni
-# Prerequisites: 
-# - Ubuntu xenial server for master and agent nodes
-# - key-based auth setup for ssh/scp between master and agent nodes
-# - 192.168.0.0/16 should not be used on your server network interface subnets
-
+#. What this is: script to setup a kubernetes cluster with calico as sni
+#. Prerequisites: 
+#. - Ubuntu xenial server for master and agent nodes
+#. - key-based auth setup for ssh/scp between master and agent nodes
+#. - 192.168.0.0/16 should not be used on your server network interface subnets
 #. Usage:
 #. $ git clone https://github.com/blsaws/nancy.git 
 #. $ cd nancy/kubernetes
-#. $ source k8s-cluster.sh master
-#. $ source k8s-cluster.sh agents "<space-separated list of agent IPs>"
-#. $ source k8s-cluster.sh ceph <ceph_dev> "<nodes>" <cluster-net> <public-net>
-#.     ceph_dev: disk to use for ceph. ***MUST NOT BE USED FOR ANY OTHER PURPOSE***
+#. $ bash k8s-cluster.sh master
+#. $ bash k8s-cluster.sh agents "<nodes>"
 #.     nodes: space-separated list of ceph node IPs
-#.     cluster-net: CIDR of ceph cluster network (typically private)
+#. $ bash k8s-cluster.sh ceph "<nodes>" <cluster-net> <public-net> [ceph_dev]
+#.     nodes: space-separated list of ceph node IPs
+#.     cluster-net: CIDR of ceph cluster network e.g. 10.0.0.1/24
 #.     public-net: CIDR of public network
-#.   The master node will be setup as ceph-mon and the agents as ceph-osd
-#. If you want to setup helm as app kubernetes orchestration tool:
-#. $ source k8s-cluster.sh helm
+#.     ceph_dev: disk to use for ceph. ***MUST NOT BE USED FOR ANY OTHER PURPOSE***
+#.               if not provided, ceph data will be stored on osd nodes in /ceph
+#. $ bash k8s-cluster.sh helm
+#.     Setup helm as app kubernetes orchestration tool
+#. $ bash k8s-cluster.sh demo
+#.     Install helm charts for mediawiki and dokuwiki
+#. $ bash k8s-cluster.sh all "<nodes>" <cluster-net> <public-net> [ceph_dev]
+#.     Runs all the steps above
 #.
 #. Status: work in progress, incomplete
 #
 
 function setup_prereqs() {
-  echo "$0: Create prerequisite setup script"
+  echo "${FUNCNAME[0]}: Create prerequisite setup script"
   cat <<'EOG' >/tmp/prereqs.sh
 #!/bin/bash
 # Basic server pre-reqs
@@ -67,7 +71,8 @@ EOG
 }
 
 function setup_k8s_master() {
-  echo "$0: Setting up kubernetes master"
+  echo "${FUNCNAME[0]}: Setting up kubernetes master"
+  setup_prereqs
 
   # Install master 
   bash /tmp/prereqs.sh master
@@ -77,91 +82,133 @@ function setup_k8s_master() {
   sudo kubeadm init --pod-network-cidr=192.168.0.0/16 >>/tmp/kubeadm.out
   cat /tmp/kubeadm.out
   export k8s_joincmd=$(grep "kubeadm join" /tmp/kubeadm.out)
-  echo "$0: Cluster join command for manual use if needed: $k8s_joincmd"
+  echo "${FUNCNAME[0]}: Cluster join command for manual use if needed: $k8s_joincmd"
 
   # Start cluster
-  echo "$0: Start the cluster"
+  echo "${FUNCNAME[0]}: Start the cluster"
   mkdir -p $HOME/.kube
   sudo cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
   sudo chown $(id -u):$(id -g) $HOME/.kube/config
   # Deploy pod network
-  echo "$0: Deploy calico as CNI"
+  echo "${FUNCNAME[0]}: Deploy calico as CNI"
   sudo kubectl apply -f http://docs.projectcalico.org/v2.4/getting-started/kubernetes/installation/hosted/kubeadm/1.6/calico.yaml
 }
 
 function setup_k8s_agents() {
-  export k8s_joincmd=$(grep "kubeadm join" /tmp/kubeadm.out)
-  echo "$0: Installing agents at $1 with joincmd: $k8s_joincmd"
   agents="$1"
+  export k8s_joincmd=$(grep "kubeadm join" /tmp/kubeadm.out)
+  echo "${FUNCNAME[0]}: Installing agents at $1 with joincmd: $k8s_joincmd"
+
+  setup_prereqs
+
+  kubedns=$(kubectl get pods --all-namespaces | grep kube-dns | awk '{print $4}')
+  while [[ "$kubedns" != "Running" ]]; do
+    echo "${FUNCNAME[0]}: kube-dns status is $kubedns. Waiting 60 seconds for it to be 'Running'" 
+    sleep 60
+    kubedns=$(kubectl get pods --all-namespaces | grep kube-dns | awk '{print $4}')
+  done
+  echo "${FUNCNAME[0]}: kube-dns status is $kubedns" 
+
   for agent in $agents; do
-    echo "$0: Install agent at $agent"
+    echo "${FUNCNAME[0]}: Install agent at $agent"
     scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no /tmp/prereqs.sh ubuntu@$agent:/tmp/prereqs.sh
     ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent bash /tmp/prereqs.sh agent
     # Workaround for "[preflight] Some fatal errors occurred: /var/lib/kubelet is not empty" per https://github.com/kubernetes/kubeadm/issues/1
     ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent sudo kubeadm reset
     ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$agent sudo $k8s_joincmd
   done
+
+  echo "${FUNCNAME[0]}: Cluster is ready when all nodes in the output of 'kubectl get nodes' show as 'Ready'."
 }
 
 function setup_ceph() {
-  ceph_dev=$1
-  node_ips=$2
-  cluster_net=$3
-  public_net=$4
+  node_ips=$1
+  cluster_net=$2
+  public_net=$3
+  ceph_dev=$4
+  echo "${FUNCNAME[0]}: Deploying ceph-mon on localhost $HOSTNAME"
+  echo "${FUNCNAME[0]}: Deploying ceph-osd on nodes $node_ips"
+  echo "${FUNCNAME[0]}: Setting cluster-network=$cluster_net and public-network=$public_net"
+  mon_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
+  all_nodes="$mon_ip $node_ips"
   # Also caches the server fingerprints so ceph-deploy does not prompt the user
-  for node_ip in $node_ips; do
-    echo "$0: Install ntp and ceph on $node_ip"
+  for node_ip in $all_nodes; do
+    echo "${FUNCNAME[0]}: Install ntp and ceph on $node_ip"
     ssh -x -o StrictHostKeyChecking=no ubuntu@$node_ip <<EOF
 sudo timedatectl set-ntp no
 wget -q -O- 'https://download.ceph.com/keys/release.asc' | sudo apt-key add -
 echo deb https://download.ceph.com/debian/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list
 sudo apt update
 sudo apt-get install -y ntp ceph ceph-deploy
+mkdir /tmp/ceph
 EOF
   done
-  mon_ip=$(echo $node_ips | cut -d ' ' -f 1)
-  mon_host=$(ssh -x -o StrictHostKeyChecking=no ubuntu@$mon_ip hostname)
-  echo "$0: Deploying ceph-mon on localhost $HOSTNAME"
-  echo "$0: Deploying ceph-osd on nodes $node_ips"
-  echo "$0: Setting cluster-network=$cluster_net and public-network=$public_net"
-
+  
   # per http://docs.ceph.com/docs/master/start/quick-ceph-deploy/
-  sudo timedatectl set-ntp no
-  wget -q -O- 'https://download.ceph.com/keys/release.asc' | sudo apt-key add -
-  echo deb https://download.ceph.com/debian/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list
-  sudo apt update
-  sudo apt-get install -y ceph ceph-deploy ntp
+  # also https://upcommons.upc.edu/bitstream/handle/2117/101816/Degree_Thesis_Nabil_El_Alami.pdf#vote +1
+  echo "${FUNCNAME[0]}: Create ceph config folder ~/ceph-cluster"
   mkdir ~/ceph-cluster
   cd ~/ceph-cluster
+  
+  echo "${FUNCNAME[0]}: Create new cluster with $HOSTNAME as initial ceph-mon node"
   ceph-deploy new --cluster-network $cluster_net --public-network $public_net --no-ssh-copykey $HOSTNAME
-  ceph-deploy install $node_ips
+  # Update conf per recommendations of http://docs.ceph.com/docs/jewel/rados/configuration/filesystem-recommendations/
+  cat <<EOF >>ceph.conf
+osd max object name len = 256
+osd max object namespace len = 64
+EOF
+  cat ceph.conf
+
+  echo "${FUNCNAME[0]}: Deploy ceph packages on other nodes"
+  ceph-deploy install $mon_ip $node_ips
+
+  echo "${FUNCNAME[0]}: Deploy the initial monitor and gather the keys"
   ceph-deploy mon create-initial
-  ceph-deploy admin $node_ips
-  for node_ip in $node_ips; do
-    echo "$0: Create ceph osd on $node_ip using $ceph_dev"
-    ceph-deploy osd create $node_ip:$ceph_dev
-  done
-  ssh -x -o StrictHostKeyChecking=no ubuntu@$mon_ip sudo ceph health
-  ssh -x -o StrictHostKeyChecking=no ubuntu@$mon_ip sudo ceph -s
+
+
+  if [[ "x$ceph_dev" == "x" ]]; then
+    n=1
+    for node_ip in $node_ips; do
+      echo "${FUNCNAME[0]}: Prepare ceph OSD on node $node_ip"
+      echo "$node_ip ceph-osd$n" | sudo tee -a /etc/hosts
+      ssh -x -o StrictHostKeyChecking=no ubuntu@$node_ip <<EOF
+echo "$node_ip ceph-osd$n" | sudo tee -a /etc/hosts
+sudo mkdir /ceph && sudo chown -R ceph:ceph /ceph
+EOF
+      ceph-deploy osd prepare ceph-osd$n:/ceph
+      ceph-deploy osd activate ceph-osd$n:/ceph
+      ((n++))
+    done
+  else 
+    echo "${FUNCNAME[0]}: Deploy OSDs"
+    for node_ip in $node_ips; do
+      echo "${FUNCNAME[0]}: Create ceph osd on $node_ip using $ceph_dev"
+      ceph-deploy osd create $node_ip:$ceph_dev
+    done
+  fi
+
+  echo "${FUNCNAME[0]}: Copy the config file and admin key to the admin node and OSD nodes"
+  ceph-deploy admin $mon_ip $node_ips
+
+  echo "${FUNCNAME[0]}: Check the cluster health"
+  sudo ceph health
+  sudo ceph -s
 
   # per https://crondev.com/kubernetes-persistent-storage-ceph/
   sudo sed -i -- 's~gcr.io/google_containers/kube-controller-manager-amd64:v1.7.7~quay.io/attcomdev/kube-controller-manager:v1.6.1~' /etc/kubernetes/manifests/kube-controller-manager.yaml
   mgr=$(kubectl get pods --all-namespaces | grep kube-controller-manager | awk '{print $4}')
   while [[ "$mgr" != "Running" ]]; do
-    echo "$0: kube-controller-manager status is $kubedns. Waiting 60 seconds for it to be 'Running'" 
+    echo "${FUNCNAME[0]}: kube-controller-manager status is $mgr. Waiting 60 seconds for it to be 'Running'" 
     sleep 60
     mgr=$(kubectl get pods --all-namespaces | grep kube-controller-manager | awk '{print $4}')
   done
-  echo "$0: kube-controller-manager status is $kubedns"
-  admin_key=$(sudo ceph --cluster ceph auth get-key client.admin)
-  kubectl create secret generic ceph-secret --type="kubernetes.io/rbd" --from-literal=key="$admin_key" --namespace=kube-system
-  sudo ceph --cluster ceph osd pool create kube 1024 1024
-  sudo ceph --cluster ceph auth get-or-create client.kube mon 'allow r' osd 'allow rwx pool=kube'
-  kube_key=$(sudo ceph --cluster ceph auth get-key client.kube)
-  kubectl create secret generic ceph-secret-kube --type="kubernetes.io/rbd" --from-literal=key="$kube_key" --namespace=default
-  # Per https://github.com/kubernetes/examples/blob/master/staging/persistent-volume-provisioning/README.md
-  # TODO: find out where in the above ~/.kube folders became owned by root
-  sudo chown -R ubuntu:ubuntu ~/.kube/*
+  echo "${FUNCNAME[0]}: kube-controller-manager status is $mgr"
+
+  echo "${FUNCNAME[0]}: Create Ceph admin secret"
+  admin_key=$(sudo ceph auth get-key client.admin)
+  kubectl create secret generic ceph-secret-admin --from-literal=key="$admin_key" --namespace=kube-system --type=kubernetes.io/rbd
+
+  echo "${FUNCNAME[0]}: Create rdb storageClass 'slow'"
   cat <<EOF >/tmp/ceph-sc.yaml
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -177,19 +224,25 @@ parameters:
     userId: kube
     userSecretName: ceph-secret-user
 EOF
+  # TODO: find out where in the above ~/.kube folders became owned by root
+  sudo chown -R ubuntu:ubuntu ~/.kube/*
   kubectl create -f /tmp/ceph-sc.yaml
 
-  kubectl create secret generic ceph-secret-admin --from-literal=key="$admin_key" --namespace=kube-system --type=kubernetes.io/rbd
-  kubectl create secret generic ceph-secret-user --from-literal=key="$kube_key" --namespace=default --type=kubernetes.io/rbd
-  # git clone https://github.com/kubernetes/charts.git
-  # sed -i -- 's/# storageClass: "-"/storageClass: "slow"/' charts/stable/mariadb/values.yaml
-  # grep storageClass charts/stable/mariadb/values.yaml
-  # helm install -f charts/stable/mariadb/values.yaml stable/mariadb
-  # sed -i -- 's/# storageClass:/storageClass: "slow"/' charts/stable/mediawiki/values.yaml
-  # helm install -f charts/stable/mediawiki/values.yaml stable/mediawiki
-  # kubectl describe pvc  
+  echo "${FUNCNAME[0]}: Create storage pool 'kube'"
+  # https://github.com/kubernetes/examples/blob/master/staging/persistent-volume-provisioning/README.md method
+  sudo ceph osd pool create kube 1024 1024
 
-  # Removed 'beta' from below
+  echo "${FUNCNAME[0]}: Authorize client 'kube' access to pool 'kube'"
+  sudo ceph auth get-or-create client.kube mon 'allow r' osd 'allow rwx pool=kube'
+
+  echo "${FUNCNAME[0]}: Create ceph-secret-user secret in namespace 'default'"
+  kube_key=$(sudo ceph auth get-key client.kube)
+  kubectl create secret generic ceph-secret-user --from-literal=key="$kube_key" --namespace=default --type=kubernetes.io/rbd
+  # A similar secret must be created in other namespaces that intend to access the ceph pool
+
+  # Per https://github.com/kubernetes/examples/blob/master/staging/persistent-volume-provisioning/README.md
+
+  echo "${FUNCNAME[0]}: Create andtest a persistentVolumeClaim"
   cat <<EOF >/tmp/ceph-pvc.yaml
 {
   "kind": "PersistentVolumeClaim",
@@ -197,7 +250,7 @@ EOF
   "metadata": {
     "name": "claim1",
     "annotations": {
-        "volume.kubernetes.io/storage-class": "ceph"
+        "volume.beta.kubernetes.io/storage-class": "slow"
     }
   },
   "spec": {
@@ -213,10 +266,49 @@ EOF
 }
 EOF
   kubectl create -f /tmp/ceph-pvc.yaml
+  kubectl describe pvc 
+  kubectl get pvc
+  kubectl delete pvc claim1
+  kubectl describe pods
+}
+
+function demo_charts() {  
+  host_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
+  cd ~
+  git clone https://github.com/kubernetes/charts.git
+  cd charts/stable
+  mkdir ./mediawiki/charts
+  cp -r ./mariadb ./mediawiki/charts 
+  sed -i -- 's/LoadBalancer/NodePort/g' ./mediawiki/values.yaml
+  sed -i -- 's/# storageClass:/storageClass: "slow"/g' ./mediawiki/values.yaml
+  sed -i -- 's/# storageClass: "-"/storageClass: "slow"/g' ./mediawiki/charts/mariadb/values.yaml
+  helm install --name test1 -f ./mediawiki/values.yaml ./mediawiki
+#  kubectl describe pvc 
+#  kubectl get pvc
+#  kubectl describe pods
+#  kubectl get pods --namespace default
+  port=$(kubectl get --namespace default -o jsonpath="{.spec.ports[0].nodePort}" services test1-mediawiki)
+  while ! curl http://$host_ip:$port ; do
+    echo "${FUNCNAME[0]}: mediawiki is not yet running... waiting 10 seconds"
+    sleep 10
+  done
+  echo "${FUNCNAME[0]}: mediawiki is available at http://$host_ip:$port"
+
+  sed -i -- 's/# storageClass:/storageClass: "slow"/g' ./dokuwiki/values.yaml
+  sed -i -- 's/LoadBalancer/NodePort/g' ./dokuwiki/values.yaml
+  helm install --name test2 -f ./dokuwiki/values.yaml ./dokuwiki
+#  kubectl get svc --namespace default test2-dokuwiki
+#  kubectl describe svc --namespace default test2-dokuwiki
+  port=$(kubectl get --namespace default -o jsonpath="{.spec.ports[0].nodePort}" services test2-dokuwiki)
+  while ! curl http://$host_ip:$port ; do
+    echo "${FUNCNAME[0]}: dokuwiki is not yet running... waiting 10 seconds"
+    sleep 10
+  done
+  echo "${FUNCNAME[0]}: dokuwiki is available at http://$host_ip:$port"
 }
 
 function setup_helm() {
-  echo "$0: Setup helm"
+  echo "${FUNCNAME[0]}: Setup helm"
   # Install Helm
   cd ~
   curl https://raw.githubusercontent.com/kubernetes/helm/master/scripts/get > get_helm.sh
@@ -229,33 +321,38 @@ function setup_helm() {
   kubectl create clusterrolebinding permissive-binding --clusterrole=cluster-admin --user=admin --user=kubelet --group=system:serviceaccounts;
   # Install services via helm charts from https://kubeapps.com/charts
   # e.g. helm install stable/dokuwiki
+  tiller_deploy=$(kubectl get pods --all-namespaces | grep tiller-deploy | awk '{print $4}')
+  while [[ "$tiller_deploy" != "Running" ]]; do
+    echo "${FUNCNAME[0]}: tiller-deploy status is $tiller_deploy. Waiting 60 seconds for it to be 'Running'" 
+    sleep 60
+    tiller_deploy=$(kubectl get pods --all-namespaces | grep tiller-deploy | awk '{print $4}')
+  done
+  echo "${FUNCNAME[0]}: tiller-deploy status is $tiller_deploy"
 }
 
 export WORK_DIR=$(pwd)
 case "$1" in
   master)
-    setup_prereqs
     setup_k8s_master
     ;;
   agents)
-    kubedns=$(kubectl get pods --all-namespaces | grep kube-dns | awk '{print $4}')
-    while [[ "$kubedns" != "Running" ]]; do
-      echo "$0: kube-dns status is $kubedns. Waiting 60 seconds for it to be 'Running'" 
-      sleep 60
-      kubedns=$(kubectl get pods --all-namespaces | grep kube-dns | awk '{print $4}')
-    done
-    echo "$0: kube-dns status is $kubedns" 
-    setup_prereqs
     setup_k8s_agents "$2"
-    echo "$0: All done. Kubernetes cluster is ready when all nodes in the output of 'kubectl get nodes' show as 'Ready'."
-    echo "$0: In the meantime, you can run this cmd to setup helm as app orchestrator: bash $WORK_DIR/k8s-cluster.sh helm"
-    echo "$0: Then to test helm: helm install --name minecraft --set minecraftServer.eula=true stable/minecraft"
     ;;
   ceph)
-    setup_ceph $2 $3 $4 $5
+    setup_ceph "$2" $3 $4 $5
     ;;
   helm)
     setup_helm
+    ;;
+  demo)
+    demo_chart
+    ;;
+  all)
+    setup_k8s_master
+    setup_k8s_agents "$2"
+    setup_ceph "$2" $3 $4 $5
+    setup_helm
+    demo_charts
     ;;
   clean)
     # TODO
