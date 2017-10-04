@@ -41,13 +41,12 @@
 # https://github.com/prometheus/collectd_exporter
 
 function setup_prometheus() {
-  echo "${FUNCNAME[0]}: Setup prometheus"
   # Prerequisites
-  echo "$0: Setting up prometheus master and agents"
+  echo "${FUNCNAME[0]}: Setting up prometheus master and agents"
   sudo apt install -y golang-go jq
 
   # Install Prometheus server
-  echo "$0: Setting up prometheus master"
+  echo "${FUNCNAME[0]}: Setting up prometheus master"
   if [[ -d ~/prometheus ]]; then rm -rf ~/prometheus; fi
   mkdir ~/prometheus
   mkdir ~/prometheus/dashboards
@@ -88,7 +87,7 @@ EOF
   nohup ./prometheus --config.file=prometheus.yml &
   # Browse to http://host_ip:9090
 
-  echo "$0: Installing exporters"
+  echo "${FUNCNAME[0]}: Installing exporters"
   # Install exporters
   # https://github.com/prometheus/node_exporter
   cd ~/prometheus
@@ -100,7 +99,7 @@ EOF
 
   # The scp and ssh actions below assume you have key-based access enabled to the nodes
   for node in $nodes; do
-    echo "$0: Setup agent at $node"
+    echo "${FUNCNAME[0]}: Setup agent at $node"
     scp -r -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
       node_exporter-0.14.0.linux-amd64/node_exporter ubuntu@$node:/home/ubuntu/node_exporter
     ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
@@ -113,11 +112,11 @@ EOF
 }
 
 function connect_grafana() {
-  echo "$0: Setup Grafana"
+  echo "${FUNCNAME[0]}: Setup Grafana"
   prometheus_ip=$1
   grafana_ip=$2
 
-  echo "$0: Setup Prometheus datasource for Grafana"
+  echo "${FUNCNAME[0]}: Setup Prometheus datasource for Grafana"
   cd ~/prometheus/
   cat >datasources.json <<EOF
 {"name":"Prometheus", "type":"prometheus", "access":"proxy", \
@@ -127,7 +126,7 @@ EOF
     -H "Content-type: application/json" \
     -d @datasources.json http://admin:admin@$grafana_ip:3000/api/datasources
 
-  echo "$0: Import Grafana dashboards"
+  echo "${FUNCNAME[0]}: Import Grafana dashboards"
   # Setup Prometheus dashboards
   # https://grafana.com/dashboards?dataSource=prometheus
   # To add additional dashboards, browse the URL above and import the dashboard via the id displayed for the dashboard
@@ -136,9 +135,7 @@ EOF
   cd ~/prometheus/dashboards
   boards=$(ls)
   for board in $boards; do
-    curl -X POST -u admin:password -H \"Accept: application/json\" \
-      -H \"Content-type: application/json\" \
-      -d @${board} http://$grafana_ip:3000/api/dashboards/db
+    curl -X POST -u admin:admin -H "Accept: application/json" -H "Content-type: application/json" -d @${board} http://$grafana_ip:3000/api/dashboards/db
   done
 }
 
