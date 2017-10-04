@@ -2,7 +2,7 @@ This folder contains scripts etc to setup a kubernetes cluster with the followin
 * hardware
   * 2 or more bare metal servers
   * two connected networks (public and private): may work if just a single network
-	* one or more disks on each server: ceph-osd can be setup on an used disk, or a folder (/ceph) on the host OS disk
+  * one or more disks on each server: ceph-osd can be setup on an used disk, or a folder (/ceph) on the host OS disk
 * kubernetes
   * single master (admin) node
   * other cluster nodes
