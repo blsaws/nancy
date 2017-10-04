@@ -281,6 +281,8 @@ function wait_for_service() {
   while [[ "$ready" != "true" ]]; do
     echo "${FUNCNAME[0]}: $1 container is not yet ready... waiting 10 seconds"
     sleep 10
+    # TODO: figure out why transient pods sometimes mess up this logic, thus need to re-get the pods
+    pod=$(kubectl get pods --namespace default | awk "/$1/ { print \$1 }")
     ready=$(kubectl get pods --namespace default -o jsonpath='{.status.containerStatuses[0].ready}' $pod)
   done
   echo "${FUNCNAME[0]}: pod $pod container status is $ready"
@@ -301,6 +303,8 @@ function demo_chart() {
   cd charts/stable
   case "$1" in
     mediawiki)
+      # NOT YET WORKING
+      # mariadb: Readiness probe failed: mysqladmin: connect to server at 'localhost' failed
       mkdir ./mediawiki/charts
       cp -r ./mariadb ./mediawiki/charts
       # LoadBalancer is N/A for baremetal (public cloud only) - use NodePort
@@ -308,14 +312,48 @@ function demo_chart() {
       # Select the storageClass created in the ceph setup step
       sed -i -- 's/# storageClass:/storageClass: "slow"/g' ./mediawiki/values.yaml
       sed -i -- 's/# storageClass: "-"/storageClass: "slow"/g' ./mediawiki/charts/mariadb/values.yaml
-      helm install --name test1 -f ./mediawiki/values.yaml ./mediawiki
-      wait_for_service test1-mediawiki
+      helm install --name mw -f ./mediawiki/values.yaml ./mediawiki
+      wait_for_service mw-mediawiki
       ;;
     dokuwiki)
       sed -i -- 's/# storageClass:/storageClass: "slow"/g' ./dokuwiki/values.yaml
       sed -i -- 's/LoadBalancer/NodePort/g' ./dokuwiki/values.yaml
-      helm install --name test2 -f ./dokuwiki/values.yaml ./dokuwiki
-      wait_for_service test2-dokuwiki
+      helm install --name dw -f ./dokuwiki/values.yaml ./dokuwiki
+      wait_for_service dw-dokuwiki
+      ;;
+    wordpress)
+      # NOT YET WORKING
+      # mariadb: Readiness probe failed: mysqladmin: connect to server at 'localhost' failed
+      mkdir ./wordpress/charts
+      cp -r ./mariadb ./wordpress/charts
+      sed -i -- 's/LoadBalancer/NodePort/g' ./wordpress/values.yaml
+      sed -i -- 's/# storageClass: "-"/storageClass: "slow"/g' ./wordpress/values.yaml
+      sed -i -- 's/# storageClass: "-"/storageClass: "slow"/g' ./wordpress/charts/mariadb/values.yaml
+      helm install --name wp -f ./wordpress/values.yaml ./wordpress
+      wait_for_service wp-wordpress
+      ;;
+    redmine)
+      # NOT YET WORKING
+      # mariadb: Readiness probe failed: mysqladmin: connect to server at 'localhost' failed
+      mkdir ./redmine/charts
+      cp -r ./mariadb ./redmine/charts
+      cp -r ./postgresql ./redmine/charts
+      sed -i -- 's/LoadBalancer/NodePort/g' ./redmine/values.yaml
+      sed -i -- 's/# storageClass: "-"/storageClass: "slow"/g' ./redmine/values.yaml
+      sed -i -- 's/# storageClass: "-"/storageClass: "slow"/g' ./redmine/charts/mariadb/values.yaml
+      sed -i -- 's/# storageClass: "-"/storageClass: "slow"/g' ./redmine/charts/postgresql/values.yaml
+      helm install --name rdm -f ./redmine/values.yaml ./redmine
+      wait_for_service rdm-redmine
+      ;;
+    owncloud)
+      # NOT YET WORKING: needs resolvable hostname for service
+      mkdir ./owncloud/charts
+      cp -r ./mariadb ./owncloud/charts
+      sed -i -- 's/LoadBalancer/NodePort/g' ./owncloud/values.yaml
+      sed -i -- 's/# storageClass: "-"/storageClass: "slow"/g' ./owncloud/values.yaml
+      sed -i -- 's/# storageClass: "-"/storageClass: "slow"/g' ./owncloud/charts/mariadb/values.yaml
+      helm install --name oc -f ./owncloud/values.yaml ./owncloud
+      wait_for_service oc-owncloud
       ;;
     *)
       echo "${FUNCNAME[0]}: demo not implemented for $1"
@@ -375,7 +413,6 @@ case "$1" in
     setup_ceph "$2" $3 $4 $5
     setup_helm
     demo_chart dokuwiki
-    demo_chart mediawiki
     ;;
   clean)
     # TODO
