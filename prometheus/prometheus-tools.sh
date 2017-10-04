@@ -18,11 +18,16 @@
 #.   rancher, openstack) and agent nodes (where applications run).
 #. Prerequisites: 
 #. - Ubuntu server for master and agent nodes
+#. - Docker installed
 #. Usage:
 #. $ git clone https://github.com/blsaws/nancy.git 
 #. $ cd nancy/prometheus
 #. $ bash prometheus-tools.sh setup "<list of agent nodes>"
 #. <list of agent nodes>: space separated IP of agent nodes
+#. $ bash prometheus-tools.sh grafana
+#.   Runs grafana in a docker container and connects to prometheus as datasource
+#. $ bash prometheus-tools.sh all
+#.   Does all of the above
 #. $ bash prometheus-tools.sh clean "<list of agent nodes>"
 #
 
@@ -36,6 +41,7 @@
 # https://github.com/prometheus/collectd_exporter
 
 function setup_prometheus() {
+  echo "${FUNCNAME[0]}: Setup prometheus"
   # Prerequisites
   echo "$0: Setting up prometheus master and agents"
   sudo apt install -y golang-go jq
@@ -130,11 +136,17 @@ EOF
   cd ~/prometheus/dashboards
   boards=$(ls)
   for board in $boards; do
-    sed -i -- "s/  \"id\": null,\a
     curl -X POST -u admin:password -H \"Accept: application/json\" \
       -H \"Content-type: application/json\" \
-      -d @${board} http://admin:admin@$grafana_ip:3000/api/dashboards/db"
+      -d @${board} http://$grafana_ip:3000/api/dashboards/db
   done
+}
+
+function run_and_connect_grafana() {
+  # Per http://docs.grafana.org/installation/docker/
+  host_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
+  sudo docker run -d -p 3000:3000 --name grafana grafana/grafana
+  connect_grafana $host_ip $host_ip
 }
 
 nodes=$2
@@ -143,10 +155,12 @@ case "$1" in
     setup_prometheus
     ;;
   grafana)
-    # Per http://docs.grafana.org/installation/docker/
-    host_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
-    sudo docker run -d -p 3000:3000 --name grafana grafana/grafana
-    connect_grafana $host_ip $host_ip
+    run_and_connect_grafana
+    ;;
+  all)
+    setup_prometheus
+    run_and_connect_grafana
+    ;;
   clean)
     sudo kill $(ps -ef | grep "\./prometheus" | grep prometheus.yml | awk '{print $2}')
     rm -rf ~/prometheus
