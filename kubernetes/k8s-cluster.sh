@@ -65,6 +65,7 @@ deb http://apt.kubernetes.io/ kubernetes-xenial main
 EOF
 sudo apt-get update
 # Next command is to workaround bug resulting in "PersistentVolumeClaim is not bound" for pod startup (remain in Pending)
+# TODO: reverify if this is still an issue in the final working script
 sudo apt-get -y install ceph-common
 sudo apt-get -y install --allow-downgrades kubectl=${KUBE_VERSION}-00 kubelet=${KUBE_VERSION}-00 kubeadm=${KUBE_VERSION}-00
 EOG
@@ -132,6 +133,7 @@ function setup_ceph() {
   mon_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
   all_nodes="$mon_ip $node_ips"
   # Also caches the server fingerprints so ceph-deploy does not prompt the user
+  # Note this loop may be partially redundant with the ceph-deploy steps below
   for node_ip in $all_nodes; do
     echo "${FUNCNAME[0]}: Install ntp and ceph on $node_ip"
     ssh -x -o StrictHostKeyChecking=no ubuntu@$node_ip <<EOF
@@ -164,7 +166,6 @@ EOF
 
   echo "${FUNCNAME[0]}: Deploy the initial monitor and gather the keys"
   ceph-deploy mon create-initial
-
 
   if [[ "x$ceph_dev" == "x" ]]; then
     n=1
@@ -272,39 +273,60 @@ EOF
   kubectl describe pods
 }
 
-function demo_charts() {  
-  host_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
+function wait_for_service() {
+  echo "${FUNCNAME[0]}: Waiting for service $1 to be available"
+  pod=$(kubectl get pods --namespace default | awk "/$1/ { print \$1 }")
+  echo "${FUNCNAME[0]}: Service $1 is at pod $pod"
+  ready=$(kubectl get pods --namespace default -o jsonpath='{.status.containerStatuses[0].ready}' $pod)
+  while [[ "$ready" != "true" ]]; do
+    echo "${FUNCNAME[0]}: $1 container is not yet ready... waiting 10 seconds"
+    sleep 10
+    ready=$(kubectl get pods --namespace default -o jsonpath='{.status.containerStatuses[0].ready}' $pod)
+  done
+  echo "${FUNCNAME[0]}: pod $pod container status is $ready"
+  host_ip=$(kubectl get pods --namespace default -o jsonpath='{.status.hostIP}' $pod)
+  port=$(kubectl get --namespace default -o jsonpath="{.spec.ports[0].nodePort}" services $1)
+  echo "${FUNCNAME[0]}: pod $pod container is at host $host_ip and port $port"
+  while ! curl http://$host_ip:$port ; do
+    echo "${FUNCNAME[0]}: $1 service is not yet responding... waiting 10 seconds"
+    sleep 10
+  done
+  echo "${FUNCNAME[0]}: $1 is available at http://$host_ip:$port"
+}
+
+function demo_chart() {
   cd ~
+  rm -rf charts
   git clone https://github.com/kubernetes/charts.git
   cd charts/stable
-  mkdir ./mediawiki/charts
-  cp -r ./mariadb ./mediawiki/charts 
-  sed -i -- 's/LoadBalancer/NodePort/g' ./mediawiki/values.yaml
-  sed -i -- 's/# storageClass:/storageClass: "slow"/g' ./mediawiki/values.yaml
-  sed -i -- 's/# storageClass: "-"/storageClass: "slow"/g' ./mediawiki/charts/mariadb/values.yaml
-  helm install --name test1 -f ./mediawiki/values.yaml ./mediawiki
-#  kubectl describe pvc 
-#  kubectl get pvc
-#  kubectl describe pods
-#  kubectl get pods --namespace default
-  port=$(kubectl get --namespace default -o jsonpath="{.spec.ports[0].nodePort}" services test1-mediawiki)
-  while ! curl http://$host_ip:$port ; do
-    echo "${FUNCNAME[0]}: mediawiki is not yet running... waiting 10 seconds"
-    sleep 10
-  done
-  echo "${FUNCNAME[0]}: mediawiki is available at http://$host_ip:$port"
-
-  sed -i -- 's/# storageClass:/storageClass: "slow"/g' ./dokuwiki/values.yaml
-  sed -i -- 's/LoadBalancer/NodePort/g' ./dokuwiki/values.yaml
-  helm install --name test2 -f ./dokuwiki/values.yaml ./dokuwiki
-#  kubectl get svc --namespace default test2-dokuwiki
-#  kubectl describe svc --namespace default test2-dokuwiki
-  port=$(kubectl get --namespace default -o jsonpath="{.spec.ports[0].nodePort}" services test2-dokuwiki)
-  while ! curl http://$host_ip:$port ; do
-    echo "${FUNCNAME[0]}: dokuwiki is not yet running... waiting 10 seconds"
-    sleep 10
-  done
-  echo "${FUNCNAME[0]}: dokuwiki is available at http://$host_ip:$port"
+  case "$1" in
+    mediawiki)
+      mkdir ./mediawiki/charts
+      cp -r ./mariadb ./mediawiki/charts
+      # LoadBalancer is N/A for baremetal (public cloud only) - use NodePort
+      sed -i -- 's/LoadBalancer/NodePort/g' ./mediawiki/values.yaml
+      # Select the storageClass created in the ceph setup step
+      sed -i -- 's/# storageClass:/storageClass: "slow"/g' ./mediawiki/values.yaml
+      sed -i -- 's/# storageClass: "-"/storageClass: "slow"/g' ./mediawiki/charts/mariadb/values.yaml
+      helm install --name test1 -f ./mediawiki/values.yaml ./mediawiki
+      wait_for_service test1-mediawiki
+      ;;
+    dokuwiki)
+      sed -i -- 's/# storageClass:/storageClass: "slow"/g' ./dokuwiki/values.yaml
+      sed -i -- 's/LoadBalancer/NodePort/g' ./dokuwiki/values.yaml
+      helm install --name test2 -f ./dokuwiki/values.yaml ./dokuwiki
+      wait_for_service test2-dokuwiki
+      ;;
+    *)
+      echo "${FUNCNAME[0]}: demo not implemented for $1"
+  esac    
+# extra useful commands
+# kubectl describe pvc 
+# kubectl get pvc
+# kubectl describe pods
+# kubectl get pods --namespace default
+# kubectl get svc --namespace default test2-dokuwiki
+# kubectl describe svc --namespace default test2-dokuwiki
 }
 
 function setup_helm() {
@@ -345,14 +367,15 @@ case "$1" in
     setup_helm
     ;;
   demo)
-    demo_chart
+    demo_chart $2
     ;;
   all)
     setup_k8s_master
     setup_k8s_agents "$2"
     setup_ceph "$2" $3 $4 $5
     setup_helm
-    demo_charts
+    demo_chart dokuwiki
+    demo_chart mediawiki
     ;;
   clean)
     # TODO
