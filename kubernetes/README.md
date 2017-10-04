@@ -14,4 +14,4 @@ See comments in [setup script](k8s-cluster.sh) for more info.
 
 This is a work in progress!
 
-![Resulting Cluster](/docs/images/nancy-k8s?raw=true "Resulting Cluster")
+![Resulting Cluster](/docs/images/nancy-k8s.png?raw=true "Resulting Cluster")
