@@ -13,10 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# What this is: Functions for testing with Prometheus. 
-# Prerequisites: 
-# - Ubuntu server for master and agent nodes
-
+#. What this is: Functions for testing with Prometheus and Grafana. Sets up
+#.   Prometheus and Grafana on a master node (e.g. for kubernetes, docker, 
+#.   rancher, openstack) and agent nodes (where applications run).
+#. Prerequisites: 
+#. - Ubuntu server for master and agent nodes
 #. Usage:
 #. $ git clone https://github.com/blsaws/nancy.git 
 #. $ cd nancy/prometheus
