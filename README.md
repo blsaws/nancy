@@ -4,13 +4,13 @@ The toolset will eventually include these elements of one or more full-stack pla
 * hardware prerequisite/options guidance
 * container-focused application runtime environment, e.g.
   * kubernetes
-	* docker-ce
-	* rancher
+  * docker-ce
+  * rancher
 * software-defined storage backends, e.g.
 	* ceph
 * runtime-native networking ("out of the box" networking features, vs some special add-on networking software)
 * app orchestration, e.g. via
   * cloudify
-	* ONAP
-	* Helm
+  * ONAP
+  * Helm
 * applications useful for platform characterization
