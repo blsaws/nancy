@@ -231,7 +231,7 @@ EOF
 
   echo "${FUNCNAME[0]}: Create storage pool 'kube'"
   # https://github.com/kubernetes/examples/blob/master/staging/persistent-volume-provisioning/README.md method
-  sudo ceph osd pool create kube 1024 1024
+  sudo ceph osd pool create kube 32 32
 
   echo "${FUNCNAME[0]}: Authorize client 'kube' access to pool 'kube'"
   sudo ceph auth get-or-create client.kube mon 'allow r' osd 'allow rwx pool=kube'
@@ -363,8 +363,10 @@ function demo_chart() {
 # kubectl get pvc
 # kubectl describe pods
 # kubectl get pods --namespace default
-# kubectl get svc --namespace default test2-dokuwiki
-# kubectl describe svc --namespace default test2-dokuwiki
+# kubectl get pods --all-namespaces
+# kubectl get svc --namespace default dw-dokuwiki
+# kubectl describe svc --namespace default dw-dokuwiki
+# kubectl describe pods --namespace default dw-dokuwiki
 }
 
 function setup_helm() {
@@ -376,11 +378,12 @@ function setup_helm() {
   ./get_helm.sh
   helm init
   helm repo update
-  # Workaround for bug https://github.com/kubernetes/helm/issues/2224
+  # TODO: Workaround for bug https://github.com/kubernetes/helm/issues/2224
   # For testing use only!
   kubectl create clusterrolebinding permissive-binding --clusterrole=cluster-admin --user=admin --user=kubelet --group=system:serviceaccounts;
-  # Install services via helm charts from https://kubeapps.com/charts
-  # e.g. helm install stable/dokuwiki
+  # TODO: workaround for tiller FailedScheduling (No nodes are available that match all of the following predicates:: PodToleratesNodeTaints (1).)
+  # kubectl taint nodes $HOSTNAME node-role.kubernetes.io/master:NoSchedule-
+  # Wait till tiller is running
   tiller_deploy=$(kubectl get pods --all-namespaces | grep tiller-deploy | awk '{print $4}')
   while [[ "$tiller_deploy" != "Running" ]]; do
     echo "${FUNCNAME[0]}: tiller-deploy status is $tiller_deploy. Waiting 60 seconds for it to be 'Running'" 
@@ -388,6 +391,9 @@ function setup_helm() {
     tiller_deploy=$(kubectl get pods --all-namespaces | grep tiller-deploy | awk '{print $4}')
   done
   echo "${FUNCNAME[0]}: tiller-deploy status is $tiller_deploy"
+
+  # Install services via helm charts from https://kubeapps.com/charts
+  # e.g. helm install stable/dokuwiki
 }
 
 export WORK_DIR=$(pwd)
