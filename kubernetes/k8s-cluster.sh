@@ -172,7 +172,7 @@ EOF
     for node_ip in $node_ips; do
       echo "${FUNCNAME[0]}: Prepare ceph OSD on node $node_ip"
       echo "$node_ip ceph-osd$n" | sudo tee -a /etc/hosts
-      ssh -x -o StrictHostKeyChecking=no ubuntu@$node_ip <<EOF
+      ssh -x -o StrictHostKeyChecking=no ubuntu@ceph-osd$n <<EOF
 echo "$node_ip ceph-osd$n" | sudo tee -a /etc/hosts
 sudo mkdir /ceph && sudo chown -R ceph:ceph /ceph
 EOF
@@ -196,7 +196,7 @@ EOF
   sudo ceph -s
 
   # per https://crondev.com/kubernetes-persistent-storage-ceph/
-  sudo sed -i -- 's~gcr.io/google_containers/kube-controller-manager-amd64:v1.7.7~quay.io/attcomdev/kube-controller-manager:v1.6.1~' /etc/kubernetes/manifests/kube-controller-manager.yaml
+  sudo sed -i -- 's~gcr.io/google_containers/kube-controller-manager-amd64:v1.7.8/attcomdev/kube-controller-manager:v1.6.1~' /etc/kubernetes/manifests/kube-controller-manager.yaml
   mgr=$(kubectl get pods --all-namespaces | grep kube-controller-manager | awk '{print $4}')
   while [[ "$mgr" != "Running" ]]; do
     echo "${FUNCNAME[0]}: kube-controller-manager status is $mgr. Waiting 60 seconds for it to be 'Running'" 
