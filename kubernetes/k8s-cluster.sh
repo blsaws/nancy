@@ -196,7 +196,7 @@ EOF
   sudo ceph -s
 
   # per https://crondev.com/kubernetes-persistent-storage-ceph/
-  sudo sed -i -- 's~gcr.io/google_containers/kube-controller-manager-amd64:v1.7.8/attcomdev/kube-controller-manager:v1.6.1~' /etc/kubernetes/manifests/kube-controller-manager.yaml
+  sudo sed -i -- 's~gcr.io/google_containers/kube-controller-manager-amd64:v1.7.8~attcomdev/kube-controller-manager:v1.6.1~' /etc/kubernetes/manifests/kube-controller-manager.yaml
   mgr=$(kubectl get pods --all-namespaces | grep kube-controller-manager | awk '{print $4}')
   while [[ "$mgr" != "Running" ]]; do
     echo "${FUNCNAME[0]}: kube-controller-manager status is $mgr. Waiting 60 seconds for it to be 'Running'" 
