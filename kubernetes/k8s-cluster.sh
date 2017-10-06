@@ -172,6 +172,7 @@ EOF
     for node_ip in $node_ips; do
       echo "${FUNCNAME[0]}: Prepare ceph OSD on node $node_ip"
       echo "$node_ip ceph-osd$n" | sudo tee -a /etc/hosts
+      # Using ceph-osd$n here avoids need for manual acceptance of the new server hash
       ssh -x -o StrictHostKeyChecking=no ubuntu@ceph-osd$n <<EOF
 echo "$node_ip ceph-osd$n" | sudo tee -a /etc/hosts
 sudo mkdir /ceph && sudo chown -R ceph:ceph /ceph
@@ -195,8 +196,13 @@ EOF
   sudo ceph health
   sudo ceph -s
 
-  # per https://crondev.com/kubernetes-persistent-storage-ceph/
-  sudo sed -i -- 's~gcr.io/google_containers/kube-controller-manager-amd64:v1.7.8~attcomdev/kube-controller-manager:v1.6.1~' /etc/kubernetes/manifests/kube-controller-manager.yaml
+  # per https://crondev.com/kubernetes-persistent-storage-ceph/ and https://github.com/kubernetes/kubernetes/issues/38923
+  # rbd  is not included in default kube-controller-manager... use attcomdev version
+  sudo sed -i -- 's~gcr.io/google_containers/kube-controller-manager-amd64:.*~quay.io/attcomdev/kube-controller-manager:v1.7.3~' /etc/kubernetes/manifests/kube-controller-manager.yaml
+  if [[ $(grep -c attcomdev/kube-controller-manager:v1.6.1 /etc/kubernetes/manifests/kube-controller-manager.yaml) == 0 ]]; then
+    echo "${FUNCNAME[0]}: Problem patching /etc/kubernetes/manifests/kube-controller-manager.yaml... script update needed"
+    exit 1
+  fi
   mgr=$(kubectl get pods --all-namespaces | grep kube-controller-manager | awk '{print $4}')
   while [[ "$mgr" != "Running" ]]; do
     echo "${FUNCNAME[0]}: kube-controller-manager status is $mgr. Waiting 60 seconds for it to be 'Running'" 
@@ -267,7 +273,12 @@ EOF
 }
 EOF
   kubectl create -f /tmp/ceph-pvc.yaml
-  kubectl describe pvc 
+  while [[ "x$(kubectl get pvc -o jsonpath='{.status.phase}' claim1)" != "xBound" ]]; do
+    echo "${FUNCNAME[0]}: Waiting for pvc claim1 to be 'Bound'"
+    kubectl describe pvc 
+    sleep 10
+  done
+  echo "${FUNCNAME[0]}: pvc claim1 successfully bound to $(kubectl get pvc -o jsonpath='{.spec.volumeName}' claim1)"
   kubectl get pvc
   kubectl delete pvc claim1
   kubectl describe pods
