@@ -94,8 +94,8 @@ EOF
   wget https://github.com/prometheus/node_exporter/releases/download/v0.14.0/node_exporter-0.14.0.linux-amd64.tar.gz
   tar xvfz node*.tar.gz
   # https://github.com/prometheus/haproxy_exporter
-  #wget https://github.com/prometheus/haproxy_exporter/releases/download/v0.7.1/haproxy_exporter-0.7.1.linux-amd64.tar.gz
-  #tar xvfz haproxy*.tar.gz
+  wget https://github.com/prometheus/haproxy_exporter/releases/download/v0.7.1/haproxy_exporter-0.7.1.linux-amd64.tar.gz
+  tar xvfz haproxy*.tar.gz
 
   # The scp and ssh actions below assume you have key-based access enabled to the nodes
   for node in $nodes; do
