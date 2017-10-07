@@ -120,11 +120,19 @@ function connect_grafana() {
   cd ~/prometheus/
   cat >datasources.json <<EOF
 {"name":"Prometheus", "type":"prometheus", "access":"proxy", \
-"url":"http://$prometheus_ip:9090/", "basicAuth":false,"isDefault":true }
+"url":"http://$prometheus_ip:9090/", "basicAuth":false,"isDefault":true, \
+"user":"", "password":"" }
 EOF
-  curl -X POST -u admin:admin -H "Accept: application/json" \
-    -H "Content-type: application/json" \
-    -d @datasources.json http://admin:admin@$grafana_ip:3000/api/datasources
+  result=""
+  while [[ "x$result" != "xDatasource added" ]]; do
+    # May need to give the prometheus server a few seconds to come online
+    sleep 10
+    result=$(curl -X POST -u admin:admin -H "Accept: application/json" \
+      -H "Content-type: application/json" \
+      -d @datasources.json http://admin:admin@$grafana_ip:3000/api/datasources \
+      | jq -r '.message')
+  done
+  echo "${FUNCNAME[0]}: Prometheus datasource for Grafana added"
 
   echo "${FUNCNAME[0]}: Import Grafana dashboards"
   # Setup Prometheus dashboards
