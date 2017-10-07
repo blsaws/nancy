@@ -26,7 +26,7 @@
 #. <list of agent nodes>: space separated IP of agent nodes
 #. $ bash prometheus-tools.sh grafana
 #.   Runs grafana in a docker container and connects to prometheus as datasource
-#. $ bash prometheus-tools.sh all
+#. $ bash prometheus-tools.sh all "<list of agent nodes>"
 #.   Does all of the above
 #. $ bash prometheus-tools.sh clean "<list of agent nodes>"
 #
@@ -50,7 +50,7 @@ function setup_prometheus() {
   if [[ -d ~/prometheus ]]; then rm -rf ~/prometheus; fi
   mkdir ~/prometheus
   mkdir ~/prometheus/dashboards
-  cp -r dashboards/* ~/prometheus/dashboards
+  cp -r ~/nancy/prometheus/dashboards/* ~/prometheus/dashboards
   cd  ~/prometheus
   wget https://github.com/prometheus/prometheus/releases/download/v2.0.0-beta.2/prometheus-2.0.0-beta.2.linux-amd64.tar.gz
   tar xvfz prometheus-*.tar.gz
@@ -143,19 +143,27 @@ function run_and_connect_grafana() {
   # Per http://docs.grafana.org/installation/docker/
   host_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
   sudo docker run -d -p 3000:3000 --name grafana grafana/grafana
+  status=$(sudo docker inspect grafana | jq -r '.[0].State.Status')
+  while [[ "x$status" != "xrunning" ]]; do
+    echo "${FUNCNAME[0]}: Grafana container state is ($status)"
+    sleep 10
+    status=$(sudo docker inspect grafana | jq -r '.[0].State.Status')
+  done
+  echo "${FUNCNAME[0]}: Grafana container state is $status"
+
   connect_grafana $host_ip $host_ip
 }
 
 nodes=$2
 case "$1" in
   setup)
-    setup_prometheus
+    setup_prometheus "$2"
     ;;
   grafana)
     run_and_connect_grafana
     ;;
   all)
-    setup_prometheus
+    setup_prometheus "$2"
     run_and_connect_grafana
     ;;
   clean)

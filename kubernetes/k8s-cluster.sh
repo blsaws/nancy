@@ -199,7 +199,7 @@ EOF
   # per https://crondev.com/kubernetes-persistent-storage-ceph/ and https://github.com/kubernetes/kubernetes/issues/38923
   # rbd  is not included in default kube-controller-manager... use attcomdev version
   sudo sed -i -- 's~gcr.io/google_containers/kube-controller-manager-amd64:.*~quay.io/attcomdev/kube-controller-manager:v1.7.3~' /etc/kubernetes/manifests/kube-controller-manager.yaml
-  if [[ $(grep -c attcomdev/kube-controller-manager:v1.6.1 /etc/kubernetes/manifests/kube-controller-manager.yaml) == 0 ]]; then
+  if [[ $(sudo grep -c attcomdev/kube-controller-manager /etc/kubernetes/manifests/kube-controller-manager.yaml) == 0 ]]; then
     echo "${FUNCNAME[0]}: Problem patching /etc/kubernetes/manifests/kube-controller-manager.yaml... script update needed"
     exit 1
   fi
@@ -435,5 +435,5 @@ case "$1" in
     # TODO
     ;;
   *)
-    grep '#. ' $0
+    if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then grep '#. ' $0; fi
 esac
