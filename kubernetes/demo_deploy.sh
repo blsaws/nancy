@@ -96,7 +96,15 @@ echo "Cloning nancy..."
 git clone https://github.com/blsaws/nancy.git
 echo "Setting up kubernetes..."
 bash nancy/kubernetes/k8s-cluster.sh all "$agent_ips" $priv_net $pub_net
+EOF
+# TODO: Figure this out... Have to break the setup into two steps as something
+# causes the ssh session to end before the prometheus setup, if both scripts 
+# (k8s-cluster and prometheus-tools) are in the same ssh session
+echo "Setting up prometheus..."
+ssh -x ubuntu@$admin_ip <<EOF
+exec ssh-agent bash
+ssh-add $key
 echo "Setting up prometheus..."
 bash nancy/prometheus/prometheus-tools.sh all "$agent_ips"
-echo "All done!"
 EOF
+echo "All done!"

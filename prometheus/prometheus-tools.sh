@@ -222,3 +222,4 @@ case "$1" in
   *)
     grep '#. ' $0
 esac
+exit 0
