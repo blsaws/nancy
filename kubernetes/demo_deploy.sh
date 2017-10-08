@@ -73,26 +73,29 @@ function wait_nodes_status() {
 }
 
 key=$1
-nodes=$33
+nodes="$2"
 admin_ip=$3
-agent_ips=$4
-pub_net=$5
-priv_net=$6
+agent_ips="$4"
+priv_net=$5
+pub_net=$6
 extras=$7
 
-release_nodes $nodes
-wait_nodes_status $nodes Ready
-deploy_nodes $nodes
-wait_nodes_status $nodes Deployed
+release_nodes "$nodes"
+wait_nodes_status "$nodes" Ready
+deploy_nodes "$nodes"
+wait_nodes_status "$nodes" Deployed
 ssh-keygen -f ~/.ssh/known_hosts -R $admin_ip
 ssh-add $key
-if [[ "x$extras" != "x" ]]; then bash $extras
+if [[ "x$extras" != "x" ]]; then source $extras; fi
 scp -o StrictHostKeyChecking=no $key ubuntu@$admin_ip:/home/ubuntu/$key
 ssh -x ubuntu@$admin_ip <<EOF
 exec ssh-agent bash
 ssh-add $key
+echo "Cloning nancy..."
 git clone https://github.com/blsaws/nancy.git
-cd nancy/kubernetes
+echo "Setting up kubernetes..."
 bash nancy/kubernetes/k8s-cluster.sh all "$agent_ips" $priv_net $pub_net
+echo "Setting up prometheus..."
 bash nancy/prometheus/prometheus-tools.sh all "$agent_ips"
+echo "All done!"
 EOF

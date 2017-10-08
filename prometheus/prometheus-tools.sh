@@ -40,6 +40,13 @@
 # https://github.com/prometheus/haproxy_exporter
 # https://github.com/prometheus/collectd_exporter
 
+# Use this to trigger fail() at the right places
+# if [ "$RESULT" == "Test Failed!" ]; then fail "message"; fi
+fail() {
+  echo "$1"
+  exit 1
+}
+
 function setup_prometheus() {
   # Prerequisites
   echo "${FUNCNAME[0]}: Setting up prometheus master and agents"
@@ -109,12 +116,34 @@ EOF
     ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
       ubuntu@$node "nohup ./haproxy_exporter > /dev/null 2>&1 &"
   done
+
+  host_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
+  while ! curl -o /tmp/up http://$host_ip:9090/api/v1/query?query=up ; do
+    echo "${FUNCNAME[0]}: Prometheus API is not yet responding... waiting 10 seconds"
+    sleep 10
+  done
+  echo "${FUNCNAME[0]}: Prometheus API is available at http://$host_ip:9090/api/v1/query?query=<string>"
+  exp=$(jq '.data.result|length' /tmp/up)
+  echo "${FUNCNAME[0]}: $exp exporters are up"
+  while [[ $exp > 0 ]]; do
+    ((exp--))
+    eip=$(jq -r ".data.result[$exp].metric.instance" /tmp/up)
+    job=$(jq -r ".data.result[$exp].metric.job" /tmp/up)
+    echo "${FUNCNAME[0]}: $job at $eip"
+  done
+  echo "${FUNCNAME[0]}: Prometheus dashboard is available at http://$host_ip:9090"
 }
 
 function connect_grafana() {
-  echo "${FUNCNAME[0]}: Setup Grafana"
+  echo "${FUNCNAME[0]}: Setup Grafana datasources and dashboards"
   prometheus_ip=$1
   grafana_ip=$2
+
+  while ! curl -X POST http://admin:admin@$grafana_ip:3000/api/login/ping ; do
+    echo "${FUNCNAME[0]}: Grafana API is not yet responding... waiting 10 seconds"
+    sleep 10
+  done
+  echo "${FUNCNAME[0]}: Grafana API is available at http://$host_ip:9090/api/v1/query?query=<string>"
 
   echo "${FUNCNAME[0]}: Setup Prometheus datasource for Grafana"
   cd ~/prometheus/
@@ -123,15 +152,13 @@ function connect_grafana() {
 "url":"http://$prometheus_ip:9090/", "basicAuth":false,"isDefault":true, \
 "user":"", "password":"" }
 EOF
-  result=""
-  while [[ "x$result" != "xDatasource added" ]]; do
-    # May need to give the prometheus server a few seconds to come online
-    sleep 10
-    result=$(curl -X POST -u admin:admin -H "Accept: application/json" \
-      -H "Content-type: application/json" \
-      -d @datasources.json http://admin:admin@$grafana_ip:3000/api/datasources \
-      | jq -r '.message')
-  done
+  curl -X POST -o /tmp/json -u admin:admin -H "Accept: application/json" \
+    -H "Content-type: application/json" \
+    -d @datasources.json http://admin:admin@$grafana_ip:3000/api/datasources
+
+  if [[ "$(jq -r '.message' /tmp/json)" != "Datasource added" ]]; then 
+    fail "Datasource creation failed"
+  fi
   echo "${FUNCNAME[0]}: Prometheus datasource for Grafana added"
 
   echo "${FUNCNAME[0]}: Import Grafana dashboards"
