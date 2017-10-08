@@ -224,3 +224,4 @@ case "$1" in
   *)
     grep '#. ' $0
 esac
+echo "${FUNCNAME[0]}: OK, we're really done now"
