@@ -85,7 +85,7 @@ wait_nodes_status "$nodes" Ready
 deploy_nodes "$nodes"
 wait_nodes_status "$nodes" Deployed
 ssh-keygen -f ~/.ssh/known_hosts -R $admin_ip
-exec ssh-agent bash
+eval `ssh-agent`
 ssh-add $key
 if [[ "x$extras" != "x" ]]; then source $extras; fi
 scp -o StrictHostKeyChecking=no $key ubuntu@$admin_ip:/home/ubuntu/$key
