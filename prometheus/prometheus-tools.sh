@@ -42,7 +42,7 @@
 
 # Use this to trigger fail() at the right places
 # if [ "$RESULT" == "Test Failed!" ]; then fail "message"; fi
-fail() {
+function fail() {
   echo "$1"
   exit 1
 }
@@ -172,6 +172,7 @@ EOF
   for board in $boards; do
     curl -X POST -u admin:admin -H "Accept: application/json" -H "Content-type: application/json" -d @${board} http://$grafana_ip:3000/api/dashboards/db
   done
+  echo "${FUNCNAME[0]}: Grafana dashboards are setup"
 }
 
 function run_and_connect_grafana() {
@@ -189,6 +190,7 @@ function run_and_connect_grafana() {
   echo "${FUNCNAME[0]}: Grafana container state is $status"
 
   connect_grafana $host_ip $host_ip
+  echo "${FUNCNAME[0]}: connect_grafana complete"
 }
 
 nodes=$2
@@ -222,4 +224,3 @@ case "$1" in
   *)
     grep '#. ' $0
 esac
-exit 0
