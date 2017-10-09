@@ -122,7 +122,7 @@ EOF
     echo "${FUNCNAME[0]}: Prometheus API is not yet responding... waiting 10 seconds"
     sleep 10
   done
-  echo "${FUNCNAME[0]}: Prometheus API is available at http://$host_ip:9090/api/v1/query?query=<string>"
+
   exp=$(jq '.data.result|length' /tmp/up)
   echo "${FUNCNAME[0]}: $exp exporters are up"
   while [[ $exp > 0 ]]; do
@@ -132,6 +132,7 @@ EOF
     echo "${FUNCNAME[0]}: $job at $eip"
   done
   echo "${FUNCNAME[0]}: Prometheus dashboard is available at http://$host_ip:9090"
+  echo "Prometheus dashboard is available at http://$host_ip:9090" auto>/tmp/summary
 }
 
 function connect_grafana() {
@@ -143,7 +144,6 @@ function connect_grafana() {
     echo "${FUNCNAME[0]}: Grafana API is not yet responding... waiting 10 seconds"
     sleep 10
   done
-  echo "${FUNCNAME[0]}: Grafana API is available at http://$host_ip:9090/api/v1/query?query=<string>"
 
   echo "${FUNCNAME[0]}: Setup Prometheus datasource for Grafana"
   cd ~/prometheus/
@@ -172,7 +172,10 @@ EOF
   for board in $boards; do
     curl -X POST -u admin:admin -H "Accept: application/json" -H "Content-type: application/json" -d @${board} http://$grafana_ip:3000/api/dashboards/db
   done
-  echo "${FUNCNAME[0]}: Grafana dashboards are setup"
+  echo "${FUNCNAME[0]}: Grafana dashboards are available at http://$host_ip:3000 (login as admin/admin)"
+  echo "Grafana dashboards are available at http://$host_ip:3000 (login as admin/admin)" >>/tmp/summary
+  echo "${FUNCNAME[0]}: Grafana API is available at http://admin:admin@$host_ip:3000/api/v1/query?query=<string>"
+  echo "Grafana API is available at http://admin:admin@$host_ip:3000/api/v1/query?query=<string>" >>/tmp/summary
 }
 
 function run_and_connect_grafana() {
@@ -224,4 +227,4 @@ case "$1" in
   *)
     grep '#. ' $0
 esac
-echo "${FUNCNAME[0]}: OK, we're really done now"
+cat /tmp/summary
