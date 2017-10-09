@@ -91,7 +91,7 @@ EOF
   done
 
   # Start Prometheus
-  nohup ./prometheus --config.file=prometheus.yml &
+  nohup ./prometheus --config.file=prometheus.yml > /dev/null 2>&1 &
   # Browse to http://host_ip:9090
 
   echo "${FUNCNAME[0]}: Installing exporters"
