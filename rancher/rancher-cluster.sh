@@ -19,8 +19,6 @@
 #. Usage:
 #. $ git clone https://github.com/blsaws/nancy.git 
 #. $ cd nancy/rancher
-#. $ source rancher-cluster.sh
-#. See below for function-specific usage
 #.
 #. Usage:
 #. $ bash rancher_cluster.sh all "<agents>"
@@ -37,32 +35,13 @@
 #. $ bash rancher_cluster.sh clean "<agents>"
 #.   Removes Rancher and installed blueprints from the master and agent nodes.
 #.
+#. To call the procedures, directly, e.g. public_endpoint nginx/lb
+#. $ source rancher-cluster.sh 
+#. See below for function-specific usage
+#.
 
-# Install master
-function setup_master() {
-  echo "${FUNCNAME[0]}: installing and starting docker"
-  # Per https://docs.docker.com/engine/installation/linux/docker-ce/ubuntu/
-  sudo apt-get remove -y docker docker-engine docker.io
-  sudo apt-get update
-  sudo apt-get install -y \
-    linux-image-extra-$(uname -r) \
-    linux-image-extra-virtual
-  sudo apt-get install -y \
-    apt-transport-https \
-    ca-certificates \
-    curl \
-    software-properties-common
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-  sudo add-apt-repository \
-   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
-   $(lsb_release -cs) \
-   stable"
-  sudo apt-get update
-  sudo apt-get install -y docker-ce
-
-  echo "${FUNCNAME[0]}: installing jq"
-  sudo apt-get install -y jq
-
+# Start and wait for master server to come up
+function start_master() {
   echo "${FUNCNAME[0]}: installing rancher server (master)"
   sudo docker run -d --restart=unless-stopped -p 8080:8080 --name rancher rancher/server
 
@@ -76,6 +55,39 @@ function setup_master() {
     id=$(wget -qO- http://$1:8080/v2-beta/projects/ | jq -r '.data[0].id')
   done
   echo "${FUNCNAME[0]}: rancher server is up after $delay seconds"
+}
+
+# Install master
+function setup_master() {
+  docker_installed=$(dpkg-query -W --showformat='${Status}\n' docker-ce | grep -c "install ok")
+  if [[ $docker_installed == 0 ]]; then
+    echo "${FUNCNAME[0]}: installing and starting docker"
+    # Per https://docs.docker.com/engine/installation/linux/docker-ce/ubuntu/
+    sudo apt-get remove -y docker docker-engine docker.io
+    sudo apt-get update
+    sudo apt-get install -y \
+      linux-image-extra-$(uname -r) \
+      linux-image-extra-virtual
+    sudo apt-get install -y \
+      apt-transport-https \
+      ca-certificates \
+      curl \
+      software-properties-common
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+    sudo add-apt-repository \
+     "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+     $(lsb_release -cs) \
+     stable"
+    sudo apt-get update
+    sudo apt-get install -y docker-ce
+
+    echo "${FUNCNAME[0]}: installing jq"
+    sudo apt-get install -y jq
+  fi
+
+  start_master $1
+
+  rm -rf ~/rancher 
   mkdir ~/rancher 
 }     
 
@@ -114,11 +126,35 @@ $RANCHER_URL
 $RANCHER_ACCESS_KEY
 $RANCHER_SECRET_KEY
 EOF
+  
+  create_regstration_token
+  create_register_command
 
+#  echo "${FUNCNAME[0]}: activate rancher debug"
+#  export RANCHER_CLIENT_DEBUG=true
+
+  echo "${FUNCNAME[0]}: Install docker-compose for syntax checks"
+  sudo apt install -y docker-compose
+
+  cd ~/rancher
+}
+
+function create_register_command() {
   master=$(rancher config --print | jq -r '.url' | cut -d '/' -f 3) 
-  env=$(rancher env | awk "/Default/ {print \$1}")
+  echo "${FUNCNAME[0]}: wait until registration command is created"
+  command=$(curl -s -u "${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}" -H 'Accept: application/json' http://$master/v1/registrationtokens/$id | jq -r '.command')
+  while [[ "$command" == "null" ]]; do
+    echo "${FUNCNAME[0]}: registration command is not yet created, checking again in 10 seconds"
+    sleep 10
+    command=$(curl -s -u "${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}" -H 'Accept: application/json' http://$master/v1/registrationtokens/$id | jq -r '.command')
+  done
 
-  set -x
+  export RANCHER_REGISTER_COMMAND="$command"
+}
+
+function create_regstration_token()
+{
+  master=$(rancher config --print | jq -r '.url' | cut -d '/' -f 3) 
   echo "${FUNCNAME[0]}: Create registration token"
   # added sleep to allow server time to be ready to create registration tokens (otherwise error is returned)
   sleep 5
@@ -129,24 +165,6 @@ EOF
   done
   id=$(jq -r ".id" /tmp/token)
   echo "${FUNCNAME[0]}: registration token id=$id"
-
-  echo "${FUNCNAME[0]}: wait until registration command is created"
-  command=$(curl -s -u "${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}" -H 'Accept: application/json' http://$master/v1/registrationtokens/$id | jq -r '.command')
-  while [[ "$command" == "null" ]]; do
-    echo "${FUNCNAME[0]}: registration command is not yet created, checking again in 10 seconds"
-    sleep 10
-    command=$(curl -s -u "${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}" -H 'Accept: application/json' http://$master/v1/registrationtokens/$id | jq -r '.command')
-  done
-
-  export RANCHER_REGISTER_COMMAND="$command"
-  set +x
-#  echo "${FUNCNAME[0]}: activate rancher debug"
-#  export RANCHER_CLIENT_DEBUG=true
-
-  echo "${FUNCNAME[0]}: Install docker-compose for syntax checks"
-  sudo apt install -y docker-compose
-
-  cd ~/rancher
 }
 
 # Start an agent host
@@ -157,17 +175,17 @@ function setup_agent() {
   ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$2 "sudo apt-get install -y docker.io; sudo service docker start"
   ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$2 $RANCHER_REGISTER_COMMAND
 
-  echo "${FUNCNAME[0]}: wait until host $2 is active"
+  echo "${FUNCNAME[0]}: wait until agent $2 is active"
   delay=0
   id=$(rancher hosts | awk "/$2/{print \$1}")
   while [[ "$id" == "" ]]; do
-    echo "${FUNCNAME[0]}: host $2 is not yet created, checking again in 10 seconds"
+    echo "${FUNCNAME[0]}: agent $2 is not yet created, checking again in 10 seconds"
     sleep 10
     let delay=$delay+10
     id=$(rancher hosts | awk "/$2/{print \$1}")
   done
 
-  echo "${FUNCNAME[0]}: host $2 id=$id"
+  echo "${FUNCNAME[0]}: agent $2 id=$id"
   state=$(rancher inspect $id | jq -r '.state')
   while [[ "$state" != "active" ]]; do
     echo "${FUNCNAME[0]}: host $2 state is $state, checking again in 10 seconds"
@@ -175,7 +193,7 @@ function setup_agent() {
     let delay=$delay+10
     state=$(rancher inspect $id | jq -r '.state')
   done
-  echo "${FUNCNAME[0]}: host $2 state is $state after $delay seconds"  
+  echo "${FUNCNAME[0]}: agent $2 state is $state after $delay seconds"  
 }
 
 # Delete an agent host
@@ -279,8 +297,6 @@ function lb_service() {
   lbport=$2
   port=$3
  
-  echo "${FUNCNAME[0]}: creating service folder ~/rancher/$service-lb"
-  mkdir ~/rancher/$service
   cd  ~/rancher/$service
   echo "${FUNCNAME[0]}: creating docker-compose-lb.yml"
   # Define lb service via docker-compose.yml
@@ -486,6 +502,7 @@ function clean() {
   done
   sudo docker stop rancher
   sudo docker rm -v rancher
+  sudo apt-get remove -y docker-ce
 }
 
 export WORK_DIR=$(pwd)
