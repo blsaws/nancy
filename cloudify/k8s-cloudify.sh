@@ -117,7 +117,6 @@ function demo() {
   cfy deployments create -t default_tenant -b k8s-hello-world k8s-hello-world
   cfy workflows list -d k8s-hello-world
   cfy executions start install -d k8s-hello-world
-  cfy executions start -d k8s-hello-world install
   pod_ip=$(kubectl get pods --namespace default -o jsonpath='{.status.podIP}' nginx)
   while [[ "x$pod_ip" == "x" ]]; do
     echo "${FUNCNAME[0]}: nginx pod IP is not yet assigned, waiting 10 seconds"

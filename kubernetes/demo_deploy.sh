@@ -113,4 +113,5 @@ echo "Setting up cloudify..."
 scp nancy/cloudify/k8s-cloudify.sh ubuntu@$admin_ip:/home/ubuntu/. 
 ssh -x ubuntu@$admin_ip bash k8s-cloudify.sh prereqs
 ssh -x ubuntu@$admin_ip bash k8s-cloudify.sh setup
+ssh -x ubuntu@$admin_ip bash k8s-cloudify.sh demo
 echo "All done!"
