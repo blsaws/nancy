@@ -13,19 +13,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# What this is: Functions for testing with rancher. 
-# Prerequisites: 
-# - Ubuntu server for master and agent nodes
-# Usage:
-# $ git clone https://github.com/blsaws/nancy.git 
-# $ cd nancy/rancher
-# $ source rancher-tools.sh
-# See below for function-specific usage
-#
+#. What this is: Functions for testing with rancher. 
+#. Prerequisites: 
+#. - Ubuntu server for master and agent nodes
+#. Usage:
+#. $ git clone https://github.com/blsaws/nancy.git 
+#. $ cd nancy/rancher
+#. $ source rancher-cluster.sh
+#. See below for function-specific usage
+#.
+#. Usage:
+#. $ bash rancher_cluster.sh all "<agents>"
+#.   Automate setup and start demo blueprints.
+#.   <agents>: space-separated list of agent node IPs
+#. $ bash rancher_cluster.sh setup "<agents>"
+#.   Installs and starts master and agent nodes.
+#. $ bash rancher_cluster.sh master
+#.   Setup the Rancher master node.
+#. $ bash rancher_cluster.sh agents "<agents>"
+#.   Installs and starts agent nodes.
+#. $ bash rancher_cluster.sh demo
+#.   Start demo blueprints.
+#. $ bash rancher_cluster.sh clean "<agents>"
+#.   Removes Rancher and installed blueprints from the master and agent nodes.
+#.
 
-# Install rancher master 
-# Usage example: install_master 172.16.0.2
-function install_master() {
+# Install master
+function setup_master() {
   echo "${FUNCNAME[0]}: installing and starting docker"
   # Per https://docs.docker.com/engine/installation/linux/docker-ce/ubuntu/
   sudo apt-get remove -y docker docker-engine docker.io
@@ -136,7 +150,7 @@ EOF
 
 # Start an agent host
 # Usage example: start_host Default 172.16.0.7
-function start_host() {
+function start_agent() {
   echo "${FUNCNAME[0]}: SSH to host $2 in env $1 and execute registration command"
 
   ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$2 "sudo apt-get install -y docker.io; sudo service docker start"
@@ -165,7 +179,7 @@ function start_host() {
 
 # Delete an agent host
 # Usage example: delete_host 172.16.0.7
-function delete_host() {
+function stop_agent() {
   echo "${FUNCNAME[0]}: deleting host $1"
   rancher rm --stop $(rancher hosts | awk "/$1/{print \$1}") 
 }
@@ -365,70 +379,6 @@ function delete_service() {
   rancher rm --stop $id 
 }
 
-# Automated demo
-# Usage example: rancher_demo start "172.16.0.7 172.16.0.8 172.16.0.9"
-# Usage example: rancher_demo clean "172.16.0.7 172.16.0.8 172.16.0.9"
-function rancher_demo() {
-  if [[ "$1" != "clean" ]]; then
-    start=`date +%s`
-    # Installation: http://rancher.com/docs/rancher/v1.6/en/
-    # Install rancher server (master) at primary interface of host
-    # Account control is disabled (open access to API), and Default env created
-    ip=$(ip route get 1 | awk '{print $NF;exit}')
-    install_master $ip
-    # Install rancher CLI tools (rancher, rancher-compose), register with master
-    # and setup CLI environment (e.g. API access/secret keys)
-    install_cli_tools $ip
-
-    # Add agent hosts per http://rancher.com/docs/rancher/v1.6/en/hosts/custom/
-    agents="$2"
-    for agent in $agents; do
-      start_host Default $agent
-    done
-
-    # Deploy apps
-    # Nginx web server, accessible on each machine port 8081, and via load
-    # balancer port 8001
-    start_simple_service nginx nginx:latest 8081:80 3
-    check_service nginx/nginx http "Welcome to nginx!"
-    lb_service nginx 8001 80
-    check_service nginx/lb http "Welcome to nginx!"
-    # Dokuwiki server, accessible on each machine port 8082, and via load
-    # balancer port 8002
-    start_simple_service dokuwiki ununseptium/dokuwiki-docker 8082:80 2
-    check_service dokuwiki/dokuwiki http "This topic does not exist yet"
-    lb_service dokuwiki 8002 80
-    check_service dokuwiki/lb http "This topic does not exist yet"
-    # Grafana server, accessible on one machine at port 3000
-    start_complex_service grafana 3000:3000 1
-    id=$(rancher ps | grep " grafana/grafana " | awk "{print \$1}")
-    cd $(dirname "$0")
-    source ../prometheus/prometheus-tools.sh setup "$agents"
-    grafana_ip=$(rancher inspect $id | jq -r ".publicEndpoints[0].ipAddress")
-    prometheus_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
-    connect_grafana $prometheus_ip $grafana_ip
-    public_endpoint nginx/lb
-    public_endpoint dokuwiki/lb
-    public_endpoint grafana/grafana
-
-    end=`date +%s`
-    runtime=$((end-start))
-    runtime=$((runtime/60))
-    echo "${FUNCNAME[0]}: Demo duration = $runtime minutes"
-  else
-    delete_service nginx/lb
-    delete_stack nginx
-    delete_service dokuwiki/lb
-    delete_stack dokuwiki
-    agents="$2"
-    for agent in $agents; do
-      delete_host $agent
-    done
-    sudo docker stop rancher
-    sudo docker rm -v rancher
-  fi
-}
-
 # Start a complex service, i.e. with yaml file customizations
 # Usage example: start_complex_service grafana 3000:3000 1
 function start_complex_service() {
@@ -468,4 +418,105 @@ EOF
   cd  ~/rancher
 }
 
+# Automated demo
+# Usage example: rancher_demo start "172.16.0.7 172.16.0.8 172.16.0.9"
+# Usage example: rancher_demo clean "172.16.0.7 172.16.0.8 172.16.0.9"
+function demo() {
+  # Deploy apps
+  # Nginx web server, accessible on each machine port 8081, and via load
+  # balancer port 8001
+  start=`date +%s`
+  setup "$1"
+  start_simple_service nginx nginx:latest 8081:80 3
+  check_service nginx/nginx http "Welcome to nginx!"
+  lb_service nginx 8001 80
+  check_service nginx/lb http "Welcome to nginx!"
+  # Dokuwiki server, accessible on each machine port 8082, and via load
+  # balancer port 8002
+  start_simple_service dokuwiki ununseptium/dokuwiki-docker 8082:80 2
+  check_service dokuwiki/dokuwiki http "This topic does not exist yet"
+  lb_service dokuwiki 8002 80
+  check_service dokuwiki/lb http "This topic does not exist yet"
+  # Grafana server, accessible on one machine at port 3000
+  start_complex_service grafana 3000:3000 1
+  id=$(rancher ps | grep " grafana/grafana " | awk "{print \$1}")
+  cd $(dirname "$0")
+  source ../prometheus/prometheus-tools.sh setup "$agents"
+  grafana_ip=$(rancher inspect $id | jq -r ".publicEndpoints[0].ipAddress")
+  prometheus_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
+  connect_grafana $prometheus_ip $grafana_ip
+  public_endpoint nginx/lb
+  public_endpoint dokuwiki/lb
+  public_endpoint grafana/grafana
 
+  end=`date +%s`
+  runtime=$((end-start))
+  runtime=$((runtime/60))
+  echo "${FUNCNAME[0]}: Demo duration = $runtime minutes"
+}
+
+# Automate the installation
+function setup() {
+  # Installation: http://rancher.com/docs/rancher/v1.6/en/
+  # Install rancher server (master) at primary interface of host
+  # Account control is disabled (open access to API), and Default env created
+  ip=$(ip route get 1 | awk '{print $NF;exit}')
+  setup_master $ip
+  # Install rancher CLI tools (rancher, rancher-compose), register with master
+  # and setup CLI environment (e.g. API access/secret keys)
+  install_cli_tools $ip
+
+  # Add agent hosts per http://rancher.com/docs/rancher/v1.6/en/hosts/custom/
+  agents="$1"
+  for agent in $agents; do
+    setup_agent Default $agent
+  done
+}
+
+# Clean the installation
+function clean() {
+  delete_service nginx/lb
+  delete_stack nginx
+  delete_service dokuwiki/lb
+  delete_stack dokuwiki
+  agents="$1"
+  for agent in $agents; do
+    stop_agent $agent
+  done
+  sudo docker stop rancher
+  sudo docker rm -v rancher
+}
+
+export WORK_DIR=$(pwd)
+case "$1" in
+  master)
+    setup_master
+    ;;
+  agents)
+    agents="$2"
+    for agent in $agents; do
+      setup_agent Default $agent
+    done
+    ;;
+  ceph)
+    # TODO Ceph support for rancher, e.g. re
+    # http://rancher.com/docs/rancher/latest/en/rancher-services/storage-service/
+    # https://github.com/rancher/rancher/issues/8722
+    # setup_ceph "$2" $3 $4 $5
+    ;;
+  demo)
+    demo "$2"
+    ;;
+  setup)
+    setup "$2"
+    ;;
+  all)
+    setup "$2"
+    demo "$2"
+    ;;
+  clean)
+    clean "$2"
+    ;;
+  *)
+    if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then grep '#. ' $0; fi
+esac
