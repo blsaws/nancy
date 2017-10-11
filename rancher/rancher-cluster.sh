@@ -75,23 +75,24 @@ function setup_master() {
     let delay=$delay+10
     id=$(wget -qO- http://$1:8080/v2-beta/projects/ | jq -r '.data[0].id')
   done
-  echo "${FUNCNAME[0]}: rancher server is up after $delay seconds"  
+  echo "${FUNCNAME[0]}: rancher server is up after $delay seconds"
+  mkdir ~/rancher 
 }     
 
 # Install rancher CLI tools
 # Usage example: install_cli_tools 172.16.0.2
 function install_cli_tools() {
   echo "${FUNCNAME[0]}: installing rancher CLI tools for master $1"
-  cd /tmp
+  cd ~
   echo "${FUNCNAME[0]}: install Rancher CLI"
   rm -rf rancher-v0.6.3
-  wget https://releases.rancher.com/cli/v0.6.3/rancher-linux-amd64-v0.6.3.tar.gz
+  wget -q https://releases.rancher.com/cli/v0.6.3/rancher-linux-amd64-v0.6.3.tar.gz
   gzip -d -f rancher-linux-amd64-v0.6.3.tar.gz
   tar -xvf rancher-linux-amd64-v0.6.3.tar
   sudo mv rancher-v0.6.3/rancher /usr/bin/rancher
   echo "${FUNCNAME[0]}: install Rancher Compose"
   rm -rf rancher-compose-v0.12.5
-  wget https://releases.rancher.com/compose/v0.12.5/rancher-compose-linux-amd64-v0.12.5.tar.gz
+  wget -q https://releases.rancher.com/compose/v0.12.5/rancher-compose-linux-amd64-v0.12.5.tar.gz
   gzip -d -f rancher-compose-linux-amd64-v0.12.5.tar.gz
   tar -xvf rancher-compose-linux-amd64-v0.12.5.tar
   sudo mv rancher-compose-v0.12.5/rancher-compose /usr/bin/rancher-compose
@@ -150,7 +151,7 @@ EOF
 
 # Start an agent host
 # Usage example: start_host Default 172.16.0.7
-function start_agent() {
+function setup_agent() {
   echo "${FUNCNAME[0]}: SSH to host $2 in env $1 and execute registration command"
 
   ssh -x -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ubuntu@$2 "sudo apt-get install -y docker.io; sudo service docker start"
