@@ -15,7 +15,7 @@
 #
 #. What this is: Setup script for Cloudify use with Kubernetes.
 #. Prerequisites: 
-#. - Kubernetes cluster installed per k8s-clustersh (in this repo)
+#. - Kubernetes cluster installed per k8s-cluster.sh (in this repo)
 #. Usage:
 #.   From a server with access to the kubernetes master node:
 #.   $ wget https://raw.githubusercontent.com/blsaws/nancy/master/kubernetes/k8s-cloudify.sh
@@ -37,7 +37,6 @@ function prereqs() {
   sudo usermod -a -G kvm $USER
   sudo chmod 0644 /boot/vmlinuz*
   echo "${FUNCNAME[0]}: Clone repo"
-  git clone https://github.com/blsaws/nancy.git
 }
 
 function setup () {
@@ -46,7 +45,7 @@ function setup () {
   cd ~/cloudify
   echo "${FUNCNAME[0]}: Setup Cloudify-CLI"
   # Per http://docs.getcloudify.org/4.1.0/installation/bootstrapping/#installing-cloudify-manager-in-an-offline-environment
-  wget http://repository.cloudifysource.org/cloudify/17.9.21/community-release/cloudify-cli-community-17.9.21.deb
+  wget -q http://repository.cloudifysource.org/cloudify/17.9.21/community-release/cloudify-cli-community-17.9.21.deb
   # Installs into /opt/cfy/
   sudo dpkg -i cloudify-cli-community-17.9.21.deb
   export MANAGER_BLUEPRINTS_DIR=/opt/cfy/cloudify-manager-blueprints
@@ -56,7 +55,7 @@ function setup () {
   echo "${FUNCNAME[0]}: Setup Cloudify-Manager"
   # to start over
   # sudo virsh destroy cloudify-manager; sudo virsh undefine cloudify-manager
-  wget http://repository.cloudifysource.org/cloudify/17.9.21/community-release/cloudify-manager-community-17.9.21.qcow2
+  wget -q http://repository.cloudifysource.org/cloudify/17.9.21/community-release/cloudify-manager-community-17.9.21.qcow2
   # nohup and redirection of output is a workaround for some issue with virt-install never outputting anything beyond "Creadint domain..." and thus not allowing the script to continue.
   nohup virt-install --connect qemu:///system --virt-type kvm --name cloudify-manager --vcpus 4 --memory 16192 --disk cloudify-manager-community-17.9.21.qcow2 --import --network network=default --os-type=linux --os-variant=rhel7 > /dev/null 2>&1 &
 
@@ -70,7 +69,10 @@ function setup () {
     VM_IP=$(/usr/sbin/arp -e | grep ${VM_MAC} | awk {'print $1'})
   done
   echo "${FUNCNAME[0]}: cloudify-manager IP=$VM_IP"
-  cfy profiles use $VM_IP -u admin -p admin -t default_tenant
+  while ! cfy profiles use $VM_IP -u admin -p admin -t default_tenant ; do
+    echo "${FUNCNAME[0]}: waiting 60 seconds for cloudify-manager API to be active"
+    sleep 60
+  done
   cfy status
   
   echo "${FUNCNAME[0]}: Install Cloudify Kubernetes Plugin"
@@ -78,7 +80,7 @@ function setup () {
   # Per https://github.com/cloudify-incubator/cloudify-kubernetes-plugin
   pip install kubernetes wagon
   # From https://github.com/cloudify-incubator/cloudify-kubernetes-plugin/releases
-  wget https://github.com/cloudify-incubator/cloudify-kubernetes-plugin/releases/download/1.2.1/cloudify_kubernetes_plugin-1.2.1-py27-none-linux_x86_64-centos-Core.wgn
+  wget -q https://github.com/cloudify-incubator/cloudify-kubernetes-plugin/releases/download/1.2.1/cloudify_kubernetes_plugin-1.2.1-py27-none-linux_x86_64-centos-Core.wgn
   # For Cloudify-CLI per http://docs.getcloudify.org/4.1.0/plugins/using-plugins/
   wagon install cloudify_kubernetes_plugin-1.2.1-py27-none-linux_x86_64-centos-Core.wgn
   # For Cloudify-Manager per https://github.com/cloudify-incubator/cloudify-kubernetes-plugin/blob/master/examples/persistent-volumes-blueprint.yaml
@@ -114,9 +116,14 @@ function demo() {
   cfy blueprints upload -t default_tenant -b k8s-hello-world ~/cloudify/blueprints/k8s-hello-world.tar.gz
   cfy deployments create -t default_tenant -b k8s-hello-world k8s-hello-world
   cfy workflows list -d k8s-hello-world
-  cfy executions start -w install -d k8s-hello-world
+  cfy executions start install -d k8s-hello-world
   cfy executions start -d k8s-hello-world install
   pod_ip=$(kubectl get pods --namespace default -o jsonpath='{.status.podIP}' nginx)
+  while [[ "x$pod_ip" == "x" ]]; do
+    echo "${FUNCNAME[0]}: nginx pod IP is not yet assigned, waiting 10 seconds"
+    sleep 10
+    pod_ip=$(kubectl get pods --namespace default -o jsonpath='{.status.podIP}' nginx)
+  done
   while ! curl http://$pod_ip ; do
     echo "${FUNCNAME[0]}: nginx pod is not yet responding at http://$pod_ip, waiting 10 seconds"
     sleep 10
@@ -125,11 +132,13 @@ function demo() {
   curl http://$pod_ip
 }
 
-clean () {
+function clean () {
+  echo "${FUNCNAME[0]}: Cleanup cloudify"
+  # TODO
 }
 
 dist=`grep DISTRIB_ID /etc/*-release | awk -F '=' '{print $2}'`
-case "$2" in
+case "$1" in
   "prereqs")
     prereqs
     ;;

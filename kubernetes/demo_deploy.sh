@@ -13,10 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-#. What this is: Complete scripted deployment of an experimental kubernetes + 
-#. helm + prometheus + grafana platform. When complete, kubernetes will be setup
-#. with dokuwiki installed as a demo app, and prometheus+grafana setup for 
-#. cluster monitoring/stats, with some demo grafana dashboards installed.
+#. What this is: Complete scripted deployment of an experimental kubernetes-based
+#. cloud-native application platform. When complete, kubernetes and the following
+#. will be installed:
+#. - helm and dokuwiki as a demo helm cart based application
+#. - prometheus + grafana for cluster monitoring/stats
+#. - cloudify + kubernetes plugin and a demo hello world (nginx) app installed
+#.  will be setup with:
 #. Prometheus dashboard: http://<admin_public_ip>:9090
 #. Grafana dashboard: http://<admin_public_ip>:3000
 #. 
@@ -89,12 +92,12 @@ eval `ssh-agent`
 ssh-add $key
 if [[ "x$extras" != "x" ]]; then source $extras; fi
 scp -o StrictHostKeyChecking=no $key ubuntu@$admin_ip:/home/ubuntu/$key
+echo "Setting up kubernetes..."
 ssh -x ubuntu@$admin_ip <<EOF
 exec ssh-agent bash
 ssh-add $key
 echo "Cloning nancy..."
 git clone https://github.com/blsaws/nancy.git
-echo "Setting up kubernetes..."
 bash nancy/kubernetes/k8s-cluster.sh all "$agent_ips" $priv_net $pub_net
 EOF
 # TODO: Figure this out... Have to break the setup into two steps as something
@@ -104,7 +107,10 @@ echo "Setting up prometheus..."
 ssh -x ubuntu@$admin_ip <<EOF
 exec ssh-agent bash
 ssh-add $key
-echo "Setting up prometheus..."
 bash nancy/prometheus/prometheus-tools.sh all "$agent_ips"
 EOF
+echo "Setting up cloudify..."
+scp nancy/cloudify/k8s-cloudify.sh ubuntu@$admin_ip:/home/ubuntu/. 
+ssh -x ubuntu@$admin_ip bash k8s-cloudify.sh prereqs
+ssh -x ubuntu@$admin_ip bash k8s-cloudify.sh setup
 echo "All done!"
