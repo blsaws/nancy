@@ -40,25 +40,6 @@
 #. See below for function-specific usage
 #.
 
-# Start and wait for master server to come up
-function start_master() {
-  echo "${FUNCNAME[0]}: installing rancher server (master)"
-  # TODO: find out why nohup below is needed, to prevent Rancher container from 
-  # exiting when the ssh session ends.
-  nohup sudo docker run -d --restart=unless-stopped -p 8080:8080 --name rancher rancher/server &
-
-  echo "${FUNCNAME[0]}: wait until server is up at http://$1:8080"
-  delay=0
-  id=$(wget -qO- http://$1:8080/v2-beta/projects/ | jq -r '.data[0].id')
-  while [[ "$id" == "" ]]; do
-    echo "${FUNCNAME[0]}: rancher server is not yet up, checking again in 10 seconds"
-    sleep 10
-    let delay=$delay+10
-    id=$(wget -qO- http://$1:8080/v2-beta/projects/ | jq -r '.data[0].id')
-  done
-  echo "${FUNCNAME[0]}: rancher server is up after $delay seconds"
-}
-
 # Install master
 function setup_master() {
   docker_installed=$(dpkg-query -W --showformat='${Status}\n' docker-ce | grep -c "install ok")
@@ -87,7 +68,21 @@ function setup_master() {
     sudo apt-get install -y jq
   fi
 
-  start_master $1
+  echo "${FUNCNAME[0]}: installing rancher server (master)"
+  # TODO: find out why nohup below is needed, to prevent Rancher container from 
+  # exiting when the ssh session ends.
+  sudo docker run -d --restart=unless-stopped -p 8080:8080 --name rancher rancher/server
+
+  echo "${FUNCNAME[0]}: wait until server is up at http://$1:8080"
+  delay=0
+  id=$(wget -qO- http://$1:8080/v2-beta/projects/ | jq -r '.data[0].id')
+  while [[ "$id" == "" ]]; do
+    echo "${FUNCNAME[0]}: rancher server is not yet up, checking again in 10 seconds"
+    sleep 10
+    let delay=$delay+10
+    id=$(wget -qO- http://$1:8080/v2-beta/projects/ | jq -r '.data[0].id')
+  done
+  echo "${FUNCNAME[0]}: rancher server is up after $delay seconds"
 
   rm -rf ~/rancher 
   mkdir ~/rancher 
@@ -129,33 +124,6 @@ $RANCHER_ACCESS_KEY
 $RANCHER_SECRET_KEY
 EOF
   
-  create_regstration_token
-  create_register_command
-
-#  echo "${FUNCNAME[0]}: activate rancher debug"
-#  export RANCHER_CLIENT_DEBUG=true
-
-  echo "${FUNCNAME[0]}: Install docker-compose for syntax checks"
-  sudo apt install -y docker-compose
-
-  cd ~/rancher
-}
-
-function create_register_command() {
-  master=$(rancher config --print | jq -r '.url' | cut -d '/' -f 3) 
-  echo "${FUNCNAME[0]}: wait until registration command is created"
-  command=$(curl -s -u "${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}" -H 'Accept: application/json' http://$master/v1/registrationtokens/$id | jq -r '.command')
-  while [[ "$command" == "null" ]]; do
-    echo "${FUNCNAME[0]}: registration command is not yet created, checking again in 10 seconds"
-    sleep 10
-    command=$(curl -s -u "${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}" -H 'Accept: application/json' http://$master/v1/registrationtokens/$id | jq -r '.command')
-  done
-
-  export RANCHER_REGISTER_COMMAND="$command"
-}
-
-function create_regstration_token()
-{
   master=$(rancher config --print | jq -r '.url' | cut -d '/' -f 3) 
   echo "${FUNCNAME[0]}: Create registration token"
   # added sleep to allow server time to be ready to create registration tokens (otherwise error is returned)
@@ -167,6 +135,24 @@ function create_regstration_token()
   done
   id=$(jq -r ".id" /tmp/token)
   echo "${FUNCNAME[0]}: registration token id=$id"
+
+  echo "${FUNCNAME[0]}: wait until registration command is created"
+  command=$(curl -s -u "${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}" -H 'Accept: application/json' http://$master/v1/registrationtokens/$id | jq -r '.command')
+  while [[ "$command" == "null" ]]; do
+    echo "${FUNCNAME[0]}: registration command is not yet created, checking again in 10 seconds"
+    sleep 10
+    command=$(curl -s -u "${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}" -H 'Accept: application/json' http://$master/v1/registrationtokens/$id | jq -r '.command')
+  done
+
+  export RANCHER_REGISTER_COMMAND="$command"
+
+#  echo "${FUNCNAME[0]}: activate rancher debug"
+#  export RANCHER_CLIENT_DEBUG=true
+
+  echo "${FUNCNAME[0]}: Install docker-compose for syntax checks"
+  sudo apt install -y docker-compose
+
+  cd ~/rancher
 }
 
 # Start an agent host
@@ -510,7 +496,8 @@ function clean() {
 export WORK_DIR=$(pwd)
 case "$1" in
   master)
-    setup_master
+    ip=$(ip route get 1 | awk '{print $NF;exit}')
+    setup_master $ip
     ;;
   agents)
     agents="$2"
