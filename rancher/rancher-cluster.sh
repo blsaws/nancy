@@ -519,6 +519,9 @@ case "$1" in
   all)
     setup "$2"
     demo "$2"
+    check_service nginx/lb
+    check_service dokuwiki/lb
+    check_service grafana/grafana
     ;;
   clean)
     clean "$2"

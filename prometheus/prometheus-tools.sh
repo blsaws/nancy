@@ -180,8 +180,6 @@ EOF
 
 function run_and_connect_grafana() {
   # Per http://docs.grafana.org/installation/docker/
-  sudo apt-get install -y docker.io
-  sudo service docker start
   host_ip=$(ip route get 8.8.8.8 | awk '{print $NF; exit}')
   sudo docker run -d -p 3000:3000 --name grafana grafana/grafana
   status=$(sudo docker inspect grafana | jq -r '.[0].State.Status')
