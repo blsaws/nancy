@@ -21,7 +21,7 @@
 #. - Password-less ssh key provided for node setup
 #. Usage: on the MAAS server
 #. $ git clone https://github.com/blsaws/nancy.git 
-#. $ bash nancy/maas/demo_deploy.sh <key> "<hosts>" [<extras>]
+#. $ source nancy/maas/demo_deploy.sh <key> "<hosts>" [<extras>]
 #. <key>: name of private key for cluster node ssh (in current folder)
 #. <hosts>: space separated list of hostnames managed by MAAS
 #. <extras>: optional name of script for extra setup functions as needed
@@ -72,7 +72,6 @@ release_nodes "$nodes"
 wait_nodes_status "$nodes" Ready
 deploy_nodes "$nodes"
 wait_nodes_status "$nodes" Deployed
-ssh-keygen -f ~/.ssh/known_hosts -R $admin_ip
 eval `ssh-agent`
 ssh-add $key
 if [[ "x$extras" != "x" ]]; then source $extras; fi

@@ -35,53 +35,13 @@
 #. <agent_ips>: space separated list of agent node IPs
 #. <extras>: optional name of script for extra setup functions as needed
 
-function wait_node_status() {
-  status=$(maas opnfv machines read hostname=$1 | jq -r ".[0].status_name")
-  while [[ "x$status" != "x$2" ]]; do
-    echo "$1 status is $status ... waiting for it to be $2"
-    sleep 30
-    status=$(maas opnfv machines read hostname=$1 | jq -r ".[0].status_name")
-  done
-  echo "$1 status is $status"
-}
-
-function release_nodes() {
-  nodes=$1
-  for node in $nodes; do
-    echo "Releasing node $node"
-    id=$(maas opnfv machines read hostname=$node | jq -r '.[0].system_id')
-    maas opnfv machines release machines=$id
-  done
-}
-
-function deploy_nodes() {
-  nodes=$1
-  for node in $nodes; do
-    echo "Deploying node $node"
-    id=$(maas opnfv machines read hostname=$node | jq -r '.[0].system_id')
-    maas opnfv machines allocate system_id=$id
-    maas opnfv machine deploy $id
-  done
-}
-
-function wait_nodes_status() {
-  nodes=$1
-  for node in $nodes; do
-    wait_node_status $node $2
-  done
-}
-
 key=$1
 nodes="$2"
 admin_ip=$3
 agent_ips="$4"
 extras=$5
 
-release_nodes "$nodes"
-wait_nodes_status "$nodes" Ready
-deploy_nodes "$nodes"
-wait_nodes_status "$nodes" Deployed
-ssh-keygen -f ~/.ssh/known_hosts -R $admin_ip
+source ~/nancy/maas/deploy.sh $1 "$2" $5
 eval `ssh-agent`
 ssh-add $key
 if [[ "x$extras" != "x" ]]; then source $extras; fi
