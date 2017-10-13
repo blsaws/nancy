@@ -64,9 +64,7 @@ function wait_nodes_status() {
 
 key=$1
 nodes="$2"
-admin_ip=$3
-agent_ips="$4"
-extras=$5
+extras=$3
 
 release_nodes "$nodes"
 wait_nodes_status "$nodes" Ready

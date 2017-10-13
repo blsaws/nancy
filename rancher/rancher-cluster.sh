@@ -69,8 +69,6 @@ function setup_master() {
   fi
 
   echo "${FUNCNAME[0]}: installing rancher server (master)"
-  # TODO: find out why nohup below is needed, to prevent Rancher container from 
-  # exiting when the ssh session ends.
   sudo docker run -d --restart=unless-stopped -p 8080:8080 --name rancher rancher/server
 
   echo "${FUNCNAME[0]}: wait until server is up at http://$1:8080"
