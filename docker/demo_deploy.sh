@@ -44,16 +44,15 @@ extras=$5
 source ~/nancy/maas/deploy.sh $1 "$2" $5
 eval `ssh-agent`
 ssh-add $key
-echo "Cloning nancy..."
-rm -rf ~/nancy
-git clone https://github.com/blsaws/nancy.git
 echo "Setting up Docker..."
 bash nancy/docker/docker-cluster.sh all $master "$workers"
 # TODO: Figure this out... Have to break the setup into two steps as something
 # causes the ssh session to end before the prometheus setup, if both scripts 
 # (k8s-cluster and prometheus-tools) are in the same ssh session
 echo "Setting up Prometheus..."
-ssh -x ubuntu@$master <<EOF
+scp -o StrictHostKeyChecking=no $key ubuntu@$master:/home/ubuntu/$key
+ssh -x -o StrictHostKeyChecking=no ubuntu@$master <<EOF
+git clone https://github.com/blsaws/nancy.git
 exec ssh-agent bash
 ssh-add $key
 bash nancy/prometheus/prometheus-tools.sh all "$master $workers"
